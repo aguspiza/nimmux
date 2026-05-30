@@ -14,7 +14,7 @@ when defined(windows):
     BOOL     = int32
     HRESULT  = int32
     SIZE_T   = uint
-    COORD    = object
+    COORD {.importc: "COORD", header: "<windows.h>".} = object
       X*, Y*: int16
 
     SECURITY_ATTRIBUTES = object
@@ -62,7 +62,7 @@ when defined(windows):
   proc ClosePseudoConsole(hPC: HPCON)
   proc ResizePseudoConsole(hPC: HPCON; size: COORD): HRESULT
   proc CreatePipe(hReadPipe, hWritePipe: ptr HANDLE;
-                  lpPipeAttributes: ptr SECURITY_ATTRIBUTES;
+                  lpPipeAttributes: pointer;
                   nSize: DWORD): BOOL
   proc CloseHandle(hObject: HANDLE): BOOL
   proc WriteFile(hFile: HANDLE; lpBuffer: pointer; nNumberOfBytesToWrite: DWORD;

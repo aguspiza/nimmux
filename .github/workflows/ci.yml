@@ -20,4 +20,4 @@ jobs:
         run: nimble install -y --depsOnly
 
       - name: Run tests
-        run: nimble test -y
+        run: testament pattern "tests/test_*.nim"
