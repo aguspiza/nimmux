@@ -41,7 +41,7 @@ Everything else (notifications, browser, SSH, hooks, IPC API, config) is post-MV
 - [x] Test framework — `testament`
 - [x] CI — GitHub Actions matrix: `ubuntu-latest` + `windows-latest` (`.github/workflows/ci.yml`)
 - [x] First test: `tests/test_scaffold.nim` — `check 1 == 1` — passes locally
-- [ ] CI green on both platforms (pending first push)
+- [x] CI green on both platforms (ubuntu 9s, windows 29s — 2026-05-30)
 
 **Verify:** `nimble test` green on both platforms.
 
