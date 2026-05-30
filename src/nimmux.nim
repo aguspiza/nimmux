@@ -1,5 +1,8 @@
 ## nimmux — terminal multiplexer.
-## Ctrl+D: vertical split   Ctrl+Shift+D: horizontal split   Tab: cycle focus
+## Ctrl+D           split vertical
+## Ctrl+Shift+D     split horizontal
+## Ctrl+Shift+]     next pane
+## Ctrl+Shift+[     previous pane
 
 import raylib
 import std/[tables, os]
@@ -34,8 +37,9 @@ proc main() =
   let initRows = int32(WinH.float32 / ch)
   let shell    = defaultShell()
 
-  var ws     = loadSession()
-  var states = initTable[int, PaneState]()
+  var ws          = loadSession()
+  var states      = initTable[int, PaneState]()
+  var showWelcome = true
 
   proc onOutput(s: ConstCStr; size: uint64; user: pointer) {.cdecl.} =
     if size == 0: return
@@ -68,15 +72,19 @@ proc main() =
       let nrows = if dir == Horizontal: ps.trm.rows div 2 else: ps.trm.rows
       addPane(newId, ncols, nrows)
       ws.setFocus(newId)
+      showWelcome = false
 
-    # cycle focus
-    if isKeyPressed(KeyboardKey.Tab) and not ctrl:
+    # cycle focus: Ctrl+Shift+] / Ctrl+Shift+[
+    if ctrl and shift:
       let all = ws.leaves()
       if all.len > 1:
         var idx = 0
         for i, id in all:
           if id == ws.focused: idx = i
-        ws.setFocus(all[(idx + 1) mod all.len])
+        if isKeyPressed(KeyboardKey.RightBracket):
+          ws.setFocus(all[(idx + 1) mod all.len])
+        elif isKeyPressed(KeyboardKey.LeftBracket):
+          ws.setFocus(all[(idx - 1 + all.len) mod all.len])
 
     # special keys → focused terminal
     if isKeyPressed(KeyboardKey.Enter):    states[ws.focused].trm.termSendKey(VTermKey.Enter)
@@ -97,14 +105,16 @@ proc main() =
       let mods = if ctrl: VTermModifier.Ctrl else: VTermModifier.None
       states[ws.focused].trm.termSendChar(cp.uint32, mods)
       cp = getCharPressed()
+      showWelcome = false
 
-    # read PTY output → libvterm
+    # read PTY output → libvterm; first output dismisses the welcome overlay
     for id in ws.leaves():
       let ps = states[id]
       let n = ps.pt.readAvailable(ps.buf)
       if n > 0:
         ps.trm.termAdvance(ps.buf.toOpenArray(ps.buf.len - n, ps.buf.len - 1))
         ps.buf.setLen(0)
+        showWelcome = false
 
     # render
     beginDrawing()
@@ -113,6 +123,8 @@ proc main() =
     let sh = getScreenHeight().float32
     for (id, rect) in ws.leafRects(Rect(x: 0, y: 0, w: sw, h: sh)):
       drawPane(font, cw, ch, states[id].trm, rect, id == ws.focused)
+    if showWelcome:
+      drawWelcome(font, ch, sw, sh)
     endDrawing()
 
   saveSession(ws)

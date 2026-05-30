@@ -10,6 +10,8 @@ const
   CursorColor      = Color(r: 220, g: 220, b: 220, a: 180)
   FocusBorderColor = Color(r: 80,  g: 140, b: 255, a: 255)
   BorderColor      = Color(r: 60,  g:  60, b:  60, a: 255)
+  WelcomePanelBG   = Color(r: 12,  g:  16, b:  24, a: 245)
+  WelcomeDimFG     = Color(r: 100, g: 100, b: 110, a: 255)
 
 proc toRColor(rgb: array[3, uint8]): Color =
   Color(r: rgb[0], g: rgb[1], b: rgb[2], a: 255)
@@ -63,3 +65,34 @@ proc drawPane*(font: Font; cellW, cellH: float32;
         drawTextCodepoint(font, Rune(cp),
                           Vector2(x: px, y: py),
                           cellH, toRColor(cell.fg.toRGB(DefaultFG)))
+
+proc drawWelcome*(font: Font; cellH: float32; sw, sh: float32) =
+  const
+    panelW = 440'f32
+    panelH = 218'f32
+    pad    = 28'f32
+    rowH   = 28'f32
+    hints  = [
+      ("Ctrl+D",        "split vertical"),
+      ("Ctrl+Shift+D",  "split horizontal"),
+      ("Ctrl+Shift+]",  "next pane"),
+      ("Ctrl+Shift+[",  "previous pane"),
+    ]
+
+  let px = (sw - panelW) * 0.5'f32
+  let py = (sh - panelH) * 0.5'f32
+
+  drawRectangle(Rectangle(x: px, y: py, width: panelW, height: panelH), WelcomePanelBG)
+  drawRectangleLines(px.int32, py.int32, panelW.int32, panelH.int32, FocusBorderColor)
+
+  let titleSz = cellH * 1.6'f32
+  drawText(font, "nimmux", Vector2(x: px + pad, y: py + pad), titleSz, 0, FocusBorderColor)
+
+  let sepY = py + pad + titleSz + 10
+  drawRectangle(Rectangle(x: px + pad, y: sepY, width: panelW - pad * 2, height: 1), BorderColor)
+
+  let hintY0 = sepY + 14
+  for i, (key, desc) in hints:
+    let y = hintY0 + float32(i) * rowH
+    drawText(font, key,  Vector2(x: px + pad,       y: y), cellH, 0, Color(r: 210, g: 210, b: 215, a: 255))
+    drawText(font, desc, Vector2(x: px + pad + 175, y: y), cellH, 0, WelcomeDimFG)
