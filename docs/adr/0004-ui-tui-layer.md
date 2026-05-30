@@ -1,6 +1,6 @@
 # UI / TUI Layer
 
-* Status: proposed
+* Status: accepted
 * Date: 2026-05-30
 
 ## Context and Problem Statement
@@ -28,16 +28,7 @@ This decision directly affects whether ADR-0003 (`alacritty_terminal` FFI) is ne
 
 ## Decision Outcome
 
-Chosen option: **TBD — to be resolved after Phase 0 PoC.**
-
-The PoC will try Option 3 (Raylib + libvterm). If the libvterm integration or Raylib rendering proves too costly for the MVP timeline, fall back to Option 2 (custom Elm-loop TUI).
-
-### Decision gate
-
-| PoC outcome | Decision |
-|---|---|
-| Raylib + libvterm works smoothly | Accept Option 3; ADR-0003 already `accepted` |
-| libvterm or Raylib proves unworkable | Accept Option 2 (TUI); update ADR-0003 |
+Chosen option: **Option 3 — Raylib + libvterm**, validated by Phase 0 PoC on Windows (2026-05-30). The PoC compiled and ran successfully: Raylib 5.6 window opened, Consolas font loaded, `cmd.exe` spawned via ConPTY, and terminal output rendered in the window.
 
 ### Consequences (if Option 3 — Raylib + libvterm)
 

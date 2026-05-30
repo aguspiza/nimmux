@@ -1,0 +1,14 @@
+nimcache/
+*.exe
+*.dll
+*.so
+*.dylib
+build/
+.nimble/
+nimble.paths
+nimble.develop
+nimbledeps
+testresults/
+tests/megatest.nim
+nimble.develop
+nimbledeps

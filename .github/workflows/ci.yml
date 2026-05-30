@@ -1,0 +1,23 @@
+name: CI
+on: [push, pull_request]
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nim
+        uses: iffy/install-nim-action@v4
+        with:
+          nim-version: "2.2.10"
+
+      - name: Install dependencies
+        run: nimble install -y --depsOnly
+
+      - name: Run tests
+        run: nimble test -y

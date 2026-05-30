@@ -18,37 +18,18 @@ Everything else (notifications, browser, SSH, hooks, IPC API, config) is post-MV
 
 ---
 
-## Phase 0 — PoC: Alacritty Integration + Splits
+## Phase 0 — PoC: Alacritty Integration + Splits ✓ DONE (2026-05-30)
 
-**Goal:** validate that `alacritty_terminal` can be called from Nim and that multiple terminal instances can be rendered in vertical and horizontal split layouts. This phase gates the entire architecture — if it fails, ADR-0003 must be revisited.
+**Goal:** validate that libvterm + Raylib can be called from Nim and that multiple terminal instances can be rendered in vertical and horizontal split layouts.
 
-> This is exploratory, not TDD. Code is throwaway. Success = the demo runs.
+**Result:** All Windows exit criteria passed on first run.
+- [x] Two live shell panes render in a vertical split
+- [x] Two live shell panes render in a horizontal split
+- [x] Switching focus between panes works (Tab)
+- [x] Runs on Linux — WSL2 Ubuntu 24.04, Mesa llvmpipe, X11/GLFW
+- [x] Runs on Windows
 
-**Steps:**
-
-1. **libvterm bindings** — write minimal Nim `{.importc.}` bindings to libvterm:
-   - `term_new(cols, rows) → VTerm`
-   - `term_free(t)`
-   - `vterm_input_write(t, bytes, len)` — feed raw PTY output
-   - `vterm_screen_get_cell(screen, pos) → VTermScreenCell` — read a character cell
-
-2. **Nim PTY** — spawn two PTYs (one per pane), each feeding into its own `VTerm`
-
-3. **Split renderer** — render two `VTerm` grids side by side in a Raylib window:
-   - Vertical split: pane A left | pane B right
-   - Horizontal split: pane A top / pane B bottom
-   - Use the simplest available rendering surface (SDL2, OpenGL, or even a terminal via ANSI codes for a first pass)
-
-4. **Interactive demo** — both panes run a real shell; keyboard input routes to the focused pane
-
-**PoC exit criteria:**
-- [ ] Two live shell panes render in a vertical split
-- [ ] Two live shell panes render in a horizontal split
-- [ ] Switching focus between panes works
-- [ ] Runs on Linux
-- [ ] Runs on Windows (stretch goal for PoC)
-
-**If PoC fails:** open a new ADR to choose an alternative VTE backend (see ADR-0003 options).
+**Stack validated:** libvterm 0.3.3 (bundled C source, `{.compile.}`) + ConPTY + Raylib 5.6 (`naylib`) + Nim 2.2.10 on Windows MSVC. PoC code lives in `poc/`.
 
 ---
 
@@ -56,11 +37,11 @@ Everything else (notifications, browser, SSH, hooks, IPC API, config) is post-MV
 
 **Goal:** a clean Nim project replacing the PoC throwaway code, with CI and a passing test.
 
-- [ ] `nimble init` — create `nimmux.nimble`, `src/`, `tests/`
-- [ ] Test framework — `testament`
-- [ ] CI — GitHub Actions matrix: `ubuntu-latest` + `windows-latest`
-- [ ] Promote the PoC Rust shim from `bridge/poc/` to `bridge/` as the real shim
-- [ ] First test: `tests/test_scaffold.nim` — assert `1 == 1`
+- [x] `nimble init` — create `nimmux.nimble`, `src/`, `tests/`
+- [x] Test framework — `testament`
+- [x] CI — GitHub Actions matrix: `ubuntu-latest` + `windows-latest` (`.github/workflows/ci.yml`)
+- [x] First test: `tests/test_scaffold.nim` — `check 1 == 1` — passes locally
+- [ ] CI green on both platforms (pending first push)
 
 **Verify:** `nimble test` green on both platforms.
 
