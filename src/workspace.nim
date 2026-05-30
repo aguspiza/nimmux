@@ -56,6 +56,15 @@ proc split*(ws: var Workspace; id: int; dir: SplitDir): int =
 proc setFocus*(ws: var Workspace; id: int) =
   ws.focused = id
 
+proc maxLeafId(node: Pane): int =
+  if node.kind == Leaf: node.id
+  else: max(maxLeafId(node.first), maxLeafId(node.second))
+
+proc restoreWorkspace*(root: Pane; focused: int): Workspace =
+  result.root    = root
+  result.focused = focused
+  result.nextId  = maxLeafId(root) + 1
+
 proc close*(ws: var Workspace; id: int) =
   if ws.root.kind == Leaf: return
 
