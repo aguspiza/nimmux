@@ -80,3 +80,24 @@ proc close*(ws: var Workspace; id: int) =
   discard go(ws.root)
   if ws.focused == id:
     ws.focused = ws.leaves()[0]
+
+type Rect* = object
+  x*, y*, w*, h*: float32
+
+proc leafRects*(node: Pane; r: Rect): seq[(int, Rect)] =
+  case node.kind
+  of Leaf:
+    result.add((node.id, r))
+  of Split:
+    let (r1, r2) =
+      if node.dir == Vertical:
+        (Rect(x: r.x, y: r.y, w: r.w * node.ratio, h: r.h),
+         Rect(x: r.x + r.w * node.ratio, y: r.y, w: r.w * (1 - node.ratio), h: r.h))
+      else:
+        (Rect(x: r.x, y: r.y, w: r.w, h: r.h * node.ratio),
+         Rect(x: r.x, y: r.y + r.h * node.ratio, w: r.w, h: r.h * (1 - node.ratio)))
+    result.add(leafRects(node.first, r1))
+    result.add(leafRects(node.second, r2))
+
+proc leafRects*(ws: Workspace; r: Rect): seq[(int, Rect)] =
+  leafRects(ws.root, r)

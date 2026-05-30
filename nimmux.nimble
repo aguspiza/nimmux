@@ -6,7 +6,7 @@ srcDir      = "src"
 bin         = @["nimmux"]
 
 requires "nim >= 2.2.0"
-# naylib added in Phase 4 when PoC UI code is promoted
+requires "naylib >= 5.0.0"
 
 task test, "Run tests with testament":
   exec "testament pattern \"tests/test_*.nim\""

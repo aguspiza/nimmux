@@ -153,6 +153,17 @@ when defined(windows):
       else:
         os.sleep(10)
 
+  proc readAvailable*(pty: Pty; buf: var seq[byte]): int =
+    var avail: DWORD
+    if PeekNamedPipe(pty.hRead, nil, 0, nil, addr avail, nil) == 0 or avail == 0:
+      return 0
+    let before = buf.len
+    buf.setLen(before + avail.int)
+    var nRead: DWORD
+    discard ReadFile(pty.hRead, buf[before].addr, avail, addr nRead, nil)
+    buf.setLen(before + nRead.int)
+    result = nRead.int
+
   proc resize*(pty: Pty; cols, rows: int32) =
     discard ResizePseudoConsole(pty.hPC, COORD(X: cols.int16, Y: rows.int16))
 
@@ -237,6 +248,17 @@ else:  # ── POSIX ───────────────────�
           break  # EOF / EIO (slave closed)
       elif r == 0 and result.len > 0:
         break    # 50 ms quiescence after receiving data
+
+  proc readAvailable*(pty: Pty; buf: var seq[byte]): int =
+    var pfd = TPollfd(fd: pty.master, events: POLLIN)
+    if poll(addr pfd, 1, 0) <= 0 or (pfd.revents and POLLIN) == 0:
+      return 0
+    var tmp: array[4096, byte]
+    let n = posix.read(pty.master, addr tmp, tmp.len)
+    if n > 0:
+      buf.add(tmp[0..<n])
+      return n
+    0
 
   proc resize*(pty: var Pty; cols, rows: int32) =
     var ws = Winsize(ws_col: cols.uint16, ws_row: rows.uint16)
