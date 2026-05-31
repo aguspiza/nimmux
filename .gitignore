@@ -12,3 +12,4 @@ testresults/
 tests/megatest.nim
 nimble.develop
 nimbledeps
+cmux/
