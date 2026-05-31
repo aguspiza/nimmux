@@ -103,19 +103,19 @@ proc main() =
         elif isKeyPressed(KeyboardKey.LeftBracket):
           ws.setFocus(all[(idx - 1 + all.len) mod all.len])
 
-    # special keys → focused terminal
-    if isKeyPressed(KeyboardKey.Enter):    states[ws.focused].trm.termSendKey(VTermKey.Enter)
-    if isKeyPressed(KeyboardKey.Backspace):states[ws.focused].trm.termSendKey(VTermKey.Backspace)
-    if isKeyPressed(KeyboardKey.Escape):   states[ws.focused].trm.termSendKey(VTermKey.Escape)
-    if isKeyPressed(KeyboardKey.Up):       states[ws.focused].trm.termSendKey(VTermKey.Up)
-    if isKeyPressed(KeyboardKey.Down):     states[ws.focused].trm.termSendKey(VTermKey.Down)
-    if isKeyPressed(KeyboardKey.Left):     states[ws.focused].trm.termSendKey(VTermKey.Left)
-    if isKeyPressed(KeyboardKey.Right):    states[ws.focused].trm.termSendKey(VTermKey.Right)
-    if isKeyPressed(KeyboardKey.Delete):   states[ws.focused].trm.termSendKey(VTermKey.Delete)
-    if isKeyPressed(KeyboardKey.Home):     states[ws.focused].trm.termSendKey(VTermKey.Home)
-    if isKeyPressed(KeyboardKey.End):      states[ws.focused].trm.termSendKey(VTermKey.End)
-    if isKeyPressed(KeyboardKey.PageUp):   states[ws.focused].trm.termSendKey(VTermKey.PageUp)
-    if isKeyPressed(KeyboardKey.PageDown): states[ws.focused].trm.termSendKey(VTermKey.PageDown)
+    # special keys → focused terminal (repeat so held keys work)
+    if isKeyPressedRepeat(KeyboardKey.Enter):    states[ws.focused].trm.termSendKey(VTermKey.Enter)
+    if isKeyPressedRepeat(KeyboardKey.Backspace):states[ws.focused].trm.termSendKey(VTermKey.Backspace)
+    if isKeyPressedRepeat(KeyboardKey.Escape):   states[ws.focused].trm.termSendKey(VTermKey.Escape)
+    if isKeyPressedRepeat(KeyboardKey.Up):       states[ws.focused].trm.termSendKey(VTermKey.Up)
+    if isKeyPressedRepeat(KeyboardKey.Down):     states[ws.focused].trm.termSendKey(VTermKey.Down)
+    if isKeyPressedRepeat(KeyboardKey.Left):     states[ws.focused].trm.termSendKey(VTermKey.Left)
+    if isKeyPressedRepeat(KeyboardKey.Right):    states[ws.focused].trm.termSendKey(VTermKey.Right)
+    if isKeyPressedRepeat(KeyboardKey.Delete):   states[ws.focused].trm.termSendKey(VTermKey.Delete)
+    if isKeyPressedRepeat(KeyboardKey.Home):     states[ws.focused].trm.termSendKey(VTermKey.Home)
+    if isKeyPressedRepeat(KeyboardKey.End):      states[ws.focused].trm.termSendKey(VTermKey.End)
+    if isKeyPressedRepeat(KeyboardKey.PageUp):   states[ws.focused].trm.termSendKey(VTermKey.PageUp)
+    if isKeyPressedRepeat(KeyboardKey.PageDown): states[ws.focused].trm.termSendKey(VTermKey.PageDown)
 
     var cp = getCharPressed()
     while cp != 0:
