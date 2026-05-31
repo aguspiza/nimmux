@@ -103,19 +103,22 @@ proc main() =
         elif isKeyPressed(KeyboardKey.LeftBracket):
           ws.setFocus(all[(idx - 1 + all.len) mod all.len])
 
-    # special keys → focused terminal (repeat so held keys work)
-    if isKeyPressedRepeat(KeyboardKey.Enter):    states[ws.focused].trm.termSendKey(VTermKey.Enter)
-    if isKeyPressedRepeat(KeyboardKey.Backspace):states[ws.focused].trm.termSendKey(VTermKey.Backspace)
-    if isKeyPressedRepeat(KeyboardKey.Escape):   states[ws.focused].trm.termSendKey(VTermKey.Escape)
-    if isKeyPressedRepeat(KeyboardKey.Up):       states[ws.focused].trm.termSendKey(VTermKey.Up)
-    if isKeyPressedRepeat(KeyboardKey.Down):     states[ws.focused].trm.termSendKey(VTermKey.Down)
-    if isKeyPressedRepeat(KeyboardKey.Left):     states[ws.focused].trm.termSendKey(VTermKey.Left)
-    if isKeyPressedRepeat(KeyboardKey.Right):    states[ws.focused].trm.termSendKey(VTermKey.Right)
-    if isKeyPressedRepeat(KeyboardKey.Delete):   states[ws.focused].trm.termSendKey(VTermKey.Delete)
-    if isKeyPressedRepeat(KeyboardKey.Home):     states[ws.focused].trm.termSendKey(VTermKey.Home)
-    if isKeyPressedRepeat(KeyboardKey.End):      states[ws.focused].trm.termSendKey(VTermKey.End)
-    if isKeyPressedRepeat(KeyboardKey.PageUp):   states[ws.focused].trm.termSendKey(VTermKey.PageUp)
-    if isKeyPressedRepeat(KeyboardKey.PageDown): states[ws.focused].trm.termSendKey(VTermKey.PageDown)
+    # special keys → focused terminal (initial press + OS repeat)
+    template termKey(k: KeyboardKey; v: VTermKey) =
+      if isKeyPressed(k) or isKeyPressedRepeat(k):
+        states[ws.focused].trm.termSendKey(v)
+    termKey KeyboardKey.Enter,    VTermKey.Enter
+    termKey KeyboardKey.Backspace,VTermKey.Backspace
+    termKey KeyboardKey.Escape,   VTermKey.Escape
+    termKey KeyboardKey.Up,       VTermKey.Up
+    termKey KeyboardKey.Down,     VTermKey.Down
+    termKey KeyboardKey.Left,     VTermKey.Left
+    termKey KeyboardKey.Right,    VTermKey.Right
+    termKey KeyboardKey.Delete,   VTermKey.Delete
+    termKey KeyboardKey.Home,     VTermKey.Home
+    termKey KeyboardKey.End,      VTermKey.End
+    termKey KeyboardKey.PageUp,   VTermKey.PageUp
+    termKey KeyboardKey.PageDown, VTermKey.PageDown
 
     var cp = getCharPressed()
     while cp != 0:
