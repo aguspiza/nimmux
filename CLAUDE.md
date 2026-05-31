@@ -52,6 +52,17 @@ Decisions are recorded in [`docs/adr/`](docs/adr/) using [MADR](https://adr.gith
 
 All keybindings currently assume **US keyboard layout** (Raylib `KeyboardKey` is position-based). Symbols like `[`, `]`, `=`, `-` are matched by physical key position, so they differ on non-US keyboards. Configurable keybindings are planned for MVP 1.1 (phase G).
 
+## Test-Driven Development
+
+**All new logic must be written test-first.** Before implementing a feature or fix:
+
+1. Write a failing test in `tests/test_<module>.nim`
+2. Run it to confirm it fails for the right reason
+3. Implement the minimum code to make it pass
+4. Run the full suite (`nimble test`) before committing
+
+Tests that cannot be automated (Raylib rendering, PTY I/O) are exempt — everything else is not.
+
 ## Development Environment
 
 **Shell:** Use Git Bash (Bash tool) for all shell commands on Windows — not PowerShell.
