@@ -124,14 +124,13 @@ proc main() =
       cp = getCharPressed()
       showWelcome = false
 
-    # read PTY output → libvterm; first output dismisses the welcome overlay
+    # read PTY output → libvterm
     for id in ws.leaves():
       let ps = states[id]
       let n = ps.pt.readAvailable(ps.buf)
       if n > 0:
         ps.trm.termAdvance(ps.buf.toOpenArray(ps.buf.len - n, ps.buf.len - 1))
         ps.buf.setLen(0)
-        showWelcome = false
 
     # close panes whose shell has exited
     var deadPanes: seq[int]
@@ -142,10 +141,8 @@ proc main() =
       if ws.leaves().len == 1:
         shouldQuit = true
         break
-      var ps = states[id]
-      ps.pt.close()
-      var t = ps.trm
-      termFree(t)
+      termFree(states[id].trm)
+      states[id].pt.close()
       states.del(id)
       ws.close(id)
 
@@ -174,11 +171,9 @@ proc main() =
   for id in ws.leaves():
     ws.setLeafCwd(id, states[id].pt.currentCwd())
   saveSession(ws)
-  for _, ps in states:
-    var p = ps.pt
-    p.close()
-    var t = ps.trm
-    termFree(t)
+  for id in ws.leaves():
+    termFree(states[id].trm)
+    states[id].pt.close()
   closeWindow()
 
 main()

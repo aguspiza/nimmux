@@ -285,6 +285,8 @@ else:  # ── POSIX ───────────────────�
       pty.master = 0
     if pty.pid > 0:
       discard kill(pty.pid, SIGTERM)
+      var status: cint
+      discard waitpid(pty.pid, status, WNOHANG)
       pty.pid = 0
 
   proc isAlive*(pty: Pty): bool =

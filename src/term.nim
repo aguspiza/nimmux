@@ -213,6 +213,7 @@ proc termNew*(cols, rows: int32): Terminal =
 
 proc termFree*(t: var Terminal) =
   if t.vt != nil:
+    vterm_output_set_callback(t.vt, nil, nil)  # deregister before free
     vterm_free(t.vt)
     t.vt = nil
 

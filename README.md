@@ -49,3 +49,12 @@ testament run tests/test_workspace.nim
 
 See [`docs/migration-plan.md`](docs/migration-plan.md) for the full phase breakdown.
 MVP 1.1 brings: OSC notifications, workspace tabs with sidebar metadata, `nimmux notify` CLI, and agent hooks for Claude Code / Codex / OpenCode.
+
+## Acknowledgements
+
+- [cmux](https://github.com/manaflow-ai/cmux) — the original Swift/macOS app this is ported from
+- [Nim](https://nim-lang.org) — the implementation language
+- [libvterm](http://www.leonerd.org.uk/code/libvterm/) — VT220/xterm terminal emulator library (bundled)
+- [nitty](https://github.com/PMunch/nitty) — libvterm validation and reference for the Nim bindings
+- [Raylib](https://www.raylib.com) — cross-platform GPU-accelerated rendering
+- [naylib](https://github.com/planetis-m/naylib) — idiomatic Nim bindings for Raylib
