@@ -1,198 +1,224 @@
-## Daemon process that manages PTY sessions independently of the main app.
-## Allows PTY processes to survive when the main app closes.
+## Daemon process — owns all PTY sessions so they survive GUI restarts.
+## Invoked as: nimmux --daemon
+## Control channel: TCP 127.0.0.1:31337 (newline-delimited JSON)
+## Data channels:   TCP 127.0.0.1:(31338 + sessionId), one per session
 
-import std/[os, json, tables, strutils]
-import osproc
+import std/[json, net, os, osproc, tables, strutils]
+import asyncnet, asyncdispatch
+import pty
+
+const
+  DaemonHost*   = "127.0.0.1"
+  ControlPort*  = 31337
+  DataPortBase* = 31338
+
+# ── types ─────────────────────────────────────────────────────────────────────
 
 type
-  DaemonMessage* = object
-    cmd*: string
-    args*: seq[string]
-    sessionId*: int
+  DaemonSession = ref object
+    id:          int
+    pt:          Pty
+    dataServer:  AsyncSocket
+    dataClients: seq[AsyncSocket]
 
-  PtySession* = ref object
-    id*: int
-    pid*: int
-    masterFd*: int
-    cwd*: string
-    cols*: int32
-    rows*: int32
-  
-  DaemonState* = ref object
-    sessions*: Table[int, PtySession]
-    nextId*: int
+# ── global daemon state ───────────────────────────────────────────────────────
 
-# Global daemon state
-var daemonState*: DaemonState
+var sessions = initTable[int, DaemonSession]()
+var nextId   = 0
 
-proc initDaemonState*() =
-  if daemonState == nil:
-    daemonState = new(DaemonState)
-    daemonState.sessions = initTable[int, PtySession]()
-    daemonState.nextId = 0
-
-proc getDaemonPath*(): string =
+proc defaultShell(): string =
   when defined(windows):
-    # Use the same directory as the main executable
-    result = getAppDir() & "\\nimmux-daemon.exe"
+    let c = getEnv("COMSPEC"); if c.len > 0: c else: "cmd.exe"
   else:
-    result = getHomeDir() & "/.local/share/nimmux/nimmux-daemon"
+    let s = getEnv("SHELL"); if s.len > 0: s else: "/bin/sh"
+
+# ── command handlers ──────────────────────────────────────────────────────────
+
+proc cmdSpawn(j: JsonNode): JsonNode =
+  let shell = j{"shell"}.getStr(defaultShell())
+  let cwd   = j{"cwd"}.getStr("")
+  let cols  = j{"cols"}.getInt(80).int32
+  let rows  = j{"rows"}.getInt(24).int32
+  let id    = nextId; inc nextId
+  let pt    = ptySpawn(shell, @[], cols, rows, cwd)
+  var srv   = newAsyncSocket()
+  srv.setSockOpt(OptReuseAddr, true)
+  srv.bindAddr(Port(DataPortBase + id), DaemonHost)
+  srv.listen(5)
+  sessions[id] = DaemonSession(id: id, pt: pt, dataServer: srv, dataClients: @[])
+  %*{"ok": true, "sessionId": id, "pid": pt.pid, "dataPort": DataPortBase + id}
+
+proc cmdResize(j: JsonNode): JsonNode =
+  let id   = j{"sessionId"}.getInt(-1)
+  let cols = j{"cols"}.getInt(80).int32
+  let rows = j{"rows"}.getInt(24).int32
+  if id notin sessions: return %*{"ok": false, "error": "not found"}
+  sessions[id].pt.resize(cols, rows)
+  %*{"ok": true}
+
+proc cmdClose(j: JsonNode): JsonNode =
+  let id = j{"sessionId"}.getInt(-1)
+  if id notin sessions: return %*{"ok": false, "error": "not found"}
+  let sess = sessions[id]
+  for c in sess.dataClients:
+    try: c.close()
+    except CatchableError: discard
+  try: sess.dataServer.close()
+  except CatchableError: discard
+  sess.pt.close()
+  sessions.del(id)
+  %*{"ok": true}
+
+proc cmdCwd(j: JsonNode): JsonNode =
+  let id = j{"sessionId"}.getInt(-1)
+  if id notin sessions: return %*{"ok": false, "error": "not found"}
+  %*{"ok": true, "cwd": sessions[id].pt.currentCwd()}
+
+proc cmdAlive(j: JsonNode): JsonNode =
+  let id = j{"sessionId"}.getInt(-1)
+  if id notin sessions: return %*{"ok": false, "alive": false}
+  %*{"ok": true, "alive": sessions[id].pt.isAlive()}
+
+proc cmdList(j: JsonNode): JsonNode =
+  var arr = newSeq[JsonNode]()
+  for id, sess in sessions:
+    arr.add(%*{"id": id, "pid": sess.pt.pid, "alive": sess.pt.isAlive(),
+               "cwd": sess.pt.currentCwd(), "dataPort": DataPortBase + id})
+  %*{"ok": true, "sessions": arr}
+
+proc cmdStatus(j: JsonNode): JsonNode =
+  %*{"ok": true, "daemon": "running", "sessions": sessions.len}
+
+proc dispatch(cmd: string; j: JsonNode): JsonNode =
+  case cmd
+  of "spawn":  cmdSpawn(j)
+  of "resize": cmdResize(j)
+  of "close":  cmdClose(j)
+  of "cwd":    cmdCwd(j)
+  of "alive":  cmdAlive(j)
+  of "list":   cmdList(j)
+  of "status": cmdStatus(j)
+  else: %*{"ok": false, "error": "unknown: " & cmd}
+
+# ── async handlers ────────────────────────────────────────────────────────────
+
+proc handleCtrlClient(client: AsyncSocket) {.async.} =
+  while true:
+    var line = ""
+    try:
+      line = await client.recvLine()
+    except CatchableError:
+      break
+    if line.len == 0: break
+    var resp: JsonNode
+    try:
+      let j = parseJson(line.strip())
+      resp = dispatch(j{"cmd"}.getStr(""), j)
+    except CatchableError as e:
+      resp = %*{"ok": false, "error": e.msg}
+    try:
+      await client.send($resp & "\n")
+    except CatchableError:
+      break
+  try: client.close()
+  except CatchableError: discard
+
+proc serveCtrl(server: AsyncSocket) {.async.} =
+  while true:
+    let client = await server.accept()
+    asyncCheck handleCtrlClient(client)
+
+proc handleDataClient(id: int; client: AsyncSocket) {.async.} =
+  while id in sessions:
+    var data = ""
+    try:
+      data = await client.recv(4096)
+    except CatchableError:
+      break
+    if data.len == 0: break
+    if id in sessions:
+      sessions[id].pt.write(data)
+  try: client.close()
+  except CatchableError: discard
+
+proc serveData(sess: DaemonSession) {.async.} =
+  while sess.id in sessions:
+    var client: AsyncSocket
+    try:
+      client = await sess.dataServer.accept()
+    except CatchableError:
+      break
+    sess.dataClients.add(client)
+    asyncCheck handleDataClient(sess.id, client)
+
+proc pollPtyOutput() {.async.} =
+  while true:
+    var deadSessions: seq[int]
+    for id, sess in sessions:
+      var buf: seq[byte]
+      discard sess.pt.readAvailable(buf)
+      if buf.len > 0:
+        let s = cast[string](buf)
+        var dead: seq[int]
+        for i, c in sess.dataClients:
+          try:
+            await c.send(s)
+          except CatchableError:
+            dead.add(i)
+        for i in countdown(dead.len - 1, 0):
+          try: sess.dataClients[i].close()
+          except CatchableError: discard
+          sess.dataClients.del(i)
+      if not sess.pt.isAlive():
+        deadSessions.add(id)
+    for id in deadSessions:
+      let sess = sessions[id]
+      for c in sess.dataClients:
+        try: c.close()
+        except CatchableError: discard
+      try: sess.dataServer.close()
+      except CatchableError: discard
+      sessions.del(id)
+    await sleepAsync(1)
+
+# ── public API ────────────────────────────────────────────────────────────────
 
 proc getDaemonSocketPath*(): string =
+  ## Returns path of the daemon PID file (readiness indicator).
   when defined(windows):
-    result = getEnv("APPDATA") & "\\nimmux\\ipc.sock"
+    getEnv("APPDATA") / "nimmux" / "daemon.pid"
   else:
-    result = getHomeDir() & "/.local/share/nimmux/ipc.sock"
+    getEnv("HOME") / ".local" / "share" / "nimmux" / "daemon.pid"
 
 proc ensureDaemonDir*() =
-  let path = getDaemonPath()
-  let dir = path.parentDir()
-  if not dir.dirExists():
-    createDir(dir)
-
-proc parseMessage*(data: string): DaemonMessage =
-  try:
-    let j = parseJson(data)
-    result.cmd = j["cmd"].str
-    if j.hasKey("args"):
-      for arg in j["args"]:
-        result.args.add(arg.str)
-    if j.hasKey("sessionId"):
-      result.sessionId = j["sessionId"].getInt()
-  except:
-    result.cmd = "error"
-    result.args = @[data]
-
-proc handleSpawn*(args: seq[string]): string =
-  ## Spawn a new PTY session
-  # args: [shell, cwd, cols, rows]
-  if args.len < 1:
-    return $(%*{"ok": false, "error": "missing shell argument"})
-  
-  let shell = args[0]
-  let cwd = if args.len > 1: args[1] else: ""
-  let cols = if args.len > 2: int32(parseInt(args[2])) else: 80'i32
-  let rows = if args.len > 3: int32(parseInt(args[3])) else: 24'i32
-  
-  # Spawn the PTY
-  var session = PtySession(
-    id: daemonState.nextId,
-    pid: 0,
-    masterFd: 0,
-    cwd: cwd,
-    cols: cols,
-    rows: rows
-  )
-  
-  try:
-    # For now, return the session ID and let main process handle PTY
-    # In full implementation, daemon would spawn PTY directly
-    let sessionId = daemonState.nextId
-    daemonState.nextId.inc
-    daemonState.sessions[sessionId] = session
-    
-    return $(%*{"ok": true, "sessionId": sessionId, "pid": 0})
-  except:
-    return $(%*{"ok": false, "error": "failed to spawn session"})
-
-proc handleConnect*(sessionIdStr: string): string =
-  ## Connect to an existing session
-  let sessionId = parseInt(sessionIdStr)
-  if not daemonState.sessions.hasKey(sessionId):
-    return $(%*{"ok": false, "error": "session not found"})
-  
-  let session = daemonState.sessions[sessionId]
-  return $(%*{
-    "ok": true, 
-    "sessionId": sessionId,
-    "pid": session.pid,
-    "cwd": session.cwd,
-    "cols": session.cols,
-    "rows": session.rows
-  })
-
-proc handleList*(): string =
-  ## List all PTY sessions
-  var sessions = newSeq[JsonNode]()
-  for id, session in daemonState.sessions:
-    sessions.add(%*{
-      "id": id,
-      "pid": session.pid,
-      "cwd": session.cwd
-    })
-  result = $(%*{"ok": true, "sessions": sessions})
-
-proc handleStatus*(): string =
-  ## Return daemon status
-  result = $(%*{"ok": true, "daemon": "running", "sessions": daemonState.sessions.len})
-
-proc daemonMain*() =
-  ## Main daemon loop - runs as a separate process
-  ## Listens for IPC commands and manages PTY sessions
-  initDaemonState()
-  
-  when defined(windows):
-    echo "Daemon starting on Windows..."
-    # TODO: Implement Windows named pipe server
-    # For now, just keep the process alive
-    while true:
-      sleep(1000)
-  else:
-    let socketPath = getDaemonSocketPath()
-    if fileExists(socketPath):
-      delFile(socketPath)
-    
-    let server = newSocket(Domain.AF_UNIX, SockType.SOCK_STREAM, Protocol.IPPROTO_IP)
-    server.getFd().SocketHandle.bindUnix(socketPath)
-    server.listen(5)
-    echo "Daemon listening on: " & socketPath
-    
-    while true:
-      try:
-        var client: Socket
-        var address = ""
-        server.acceptAddr(client, address)
-        var buf = newString(4096)
-        let n = client.recv(buf, 4096)
-        if n > 0:
-          buf.setLen(n)
-          let msg = parseMessage(buf)
-          echo "Received command: " & msg.cmd
-          let response = case msg.cmd
-          of "status": handleStatus()
-          of "list": handleList()
-          of "spawn": handleSpawn(msg.args)
-          of "connect": 
-            if msg.args.len > 0: handleConnect(msg.args[0])
-            else: $(%*{"ok": false, "error": "missing sessionId"})
-          else: $(%*{"ok": false, "error": "unknown command"})
-          client.send(response)
-        client.close()
-      except e:
-        echo "Error: " & e.msg
+  createDir(getDaemonSocketPath().parentDir())
 
 proc spawnDaemon*(): Process =
-  ## Spawn the daemon as a background process
-  let daemonPath = getDaemonPath()
-  if not fileExists(daemonPath):
-    return nil
-  
-  result = startProcess(daemonPath, args = @["--daemon"])
+  ## Spawn the nimmux-daemon binary from the same directory as the running exe.
+  ensureDaemonDir()
+  let daemonExe = when defined(windows): getAppDir() / "nimmux-daemon.exe"
+                  else: getAppDir() / "nimmux-daemon"
+  if not fileExists(daemonExe): return nil
+  startProcess(daemonExe, options = {poDaemon})
 
-when isMainModule:
-  if paramCount() > 0 and paramStr(1) == "--daemon":
-    daemonMain()
-  else:
-    # Check if daemon is already running
-    let socketPath = getDaemonSocketPath()
-    var daemonRunning = false
-    when not defined(windows):
-      daemonRunning = fileExists(socketPath)
-    
-    if not daemonRunning:
-      # Spawn daemon
-      let daemon = spawnDaemon()
-      if daemon != nil:
-        echo "Daemon started"
-    else:
-      echo "Daemon already running"
+proc isDaemonRunning*(): bool =
+  ## Probe by attempting a TCP connection to the control port.
+  try:
+    var s = newSocket()
+    defer: s.close()
+    s.connect(DaemonHost, Port(ControlPort), timeout = 200)
+    true
+  except CatchableError: false
+
+proc daemonMain*() =
+  ensureDaemonDir()
+  writeFile(getDaemonSocketPath(), $getCurrentProcessId())
+
+  var ctrlServer = newAsyncSocket()
+  ctrlServer.setSockOpt(OptReuseAddr, true)
+  ctrlServer.bindAddr(Port(ControlPort), DaemonHost)
+  ctrlServer.listen(20)
+
+  asyncCheck serveCtrl(ctrlServer)
+  asyncCheck pollPtyOutput()
+  runForever()

@@ -10,7 +10,7 @@
 
 import raylib
 import std/[tables, os, osproc, streams, strutils, times]
-import workspace, term, pty, renderer, session, daemon
+import workspace, term, renderer, session, daemon, ipc
 
 const
   SidebarWidth  = 200.0'f32
@@ -18,7 +18,7 @@ const
 
 type PaneState = ref object
   trm:      Terminal
-  pt:       Pty
+  pt:       DaemonPty
   buf:      seq[byte]
   fontSize: float32
 
@@ -148,7 +148,7 @@ else:
     if fields.len < 4: return -1
     try: parseInt(fields[3]) except: -1
 
-proc getPanePorts(pt: Pty): seq[string] =
+proc getPanePorts(pt: DaemonPty): seq[string] =
   when defined(windows):
     let shellPid = pt.shellPid()
     if shellPid == 0: return @[]
@@ -184,9 +184,13 @@ proc getPanePorts(pt: Pty): seq[string] =
 
 proc main() =
   # Ensure daemon is running for PTY persistence
-  ensureDaemonDir()
-  if not fileExists(getDaemonSocketPath()):
+  if not isDaemonRunning():
     discard spawnDaemon()
+    # Wait up to 2s for daemon to be ready
+    for _ in 0 ..< 20:
+      os.sleep(100)
+      if isDaemonRunning(): break
+  connectDaemon()
   
   setTraceLogLevel(TraceLogLevel.Error)
   setConfigFlags(flags(ConfigFlags.VsyncHint, ConfigFlags.WindowResizable))
@@ -213,12 +217,15 @@ proc main() =
     copyMem(data[0].addr, s, size.int)
     ps.pt.write(data)
 
-  proc addPane(id: int; cols, rows: int32; cwd = ""; fontSize = FontSz; ptyState: PtyState = PtyState()) =
-    let ps = PaneState(
-      trm:      termNew(cols, rows),
-      pt:       ptySpawn(shell, @[], cols, rows, cwd, ptyState),
-      buf:      @[],
-      fontSize: fontSize)
+  proc addPane(id: int; cols, rows: int32; cwd = ""; fontSize = FontSz;
+               savedDaemonId = -1) =
+    var pt: DaemonPty
+    if savedDaemonId >= 0:
+      try: pt = attachSession(savedDaemonId)
+      except: pt = spawnSession(shell, cwd, cols, rows)
+    else:
+      pt = spawnSession(shell, cwd, cols, rows)
+    let ps = PaneState(trm: termNew(cols, rows), pt: pt, buf: @[], fontSize: fontSize)
     vterm_output_set_callback(ps.trm.vt, onOutput, cast[pointer](ps))
     states[id] = ps
 
@@ -235,7 +242,9 @@ proc main() =
         break
 
   for id in ws.leaves():
-    addPane(id, initCols, initRows, ws.leafCwd(id), ptyState = sessionData.ptyStates.getOrDefault(id, PtyState()))
+    let saved = sessionData.ptyStates.getOrDefault(id, PtyState())
+    addPane(id, initCols, initRows, saved.cwd,
+            savedDaemonId = if saved.daemonSessionId > 0: saved.daemonSessionId else: -1)
 
   var shouldQuit = false
   var zoomed     = false
@@ -405,13 +414,13 @@ proc main() =
 
   for id in ws.leaves():
     ws.setLeafCwd(id, states[id].pt.currentCwd())
-  # Save PTY state for each pane
   var ptyStates = ptyStatesEmpty()
   for id in ws.leaves():
     ptyStates[id] = PtyState(
-      pid: states[id].pt.pid,
-      masterFd: states[id].pt.masterFd,
-      cwd: states[id].pt.currentCwd()
+      pid:             states[id].pt.pid,
+      masterFd:        0,
+      cwd:             states[id].pt.currentCwd(),
+      daemonSessionId: states[id].pt.sessionId
     )
   saveSession(SessionData(workspace: ws, ptyStates: ptyStates))
   for id in ws.leaves():

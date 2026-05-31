@@ -1,58 +1,107 @@
-## IPC client for communicating with the daemon
+## IPC client — DaemonPty wraps a daemon session over TCP.
+## Implements the same interface as Pty so nimmux.nim needs minimal changes.
 
-import std/[os, json, osproc, strutils]
+import std/[json, net]
+import daemon
 
-type
-  IpcClient* = ref object of RootObj
+# ── module-level control connection (shared across all DaemonPty instances) ───
 
-proc connectToDaemon*(): IpcClient =
-  ## Connect to the daemon and return a client
-  new(result)
+var daemonCtrl: Socket
 
-proc sendCommand*(client: IpcClient; cmd: string; args: seq[string] = @[]): string =
-  ## Send a command to the daemon and return the response
-  when defined(windows):
-    # Windows: Use named pipes
-    # TODO: Implement Windows named pipe client
-    return $(%*{"ok": false, "error": "Windows IPC not implemented"})
-  else:
-    # POSIX: Use Unix domain socket
-    let socketPath = getDaemonSocketPath()
-    if not fileExists(socketPath):
-      return $(%*{"ok": false, "error": "daemon not running"})
-    
-    # Create socket and connect
-    var addr: sockaddr_un
-    addr.sun_family = AF_UNIX
-    let pathBytes = socketPath.toUnixPath()
-    copyMem(addr.sun_path, pathBytes, min(pathBytes.len, sizeof(addr.sun_path)))
-    
-    let sock = socket(AF_UNIX, SOCK_STREAM, 0)
-    if sock < 0:
-      return $(%*{"ok": false, "error": "socket creation failed"})
-    
-    if connect(sock, cast[ptr sockaddr](addr.addr), sizeof(addr).socklen_t) < 0:
-      close(sock)
-      return $(%*{"ok": false, "error": "connect failed"})
-    
-    # Send message
-    let msg = %*{"cmd": cmd, "args": args}
-    let msgStr = $msg
-    let msgLen = msgStr.len
-    discard send(sock, msgStr[0].unsafeAddr, msgLen.DWORD, 0)
-    
-    # Receive response
-    var buf: array[4096, byte]
-    let n = recv(sock, buf[0].unsafeAddr, 4096.DWORD, 0)
-    close(sock)
-    
-    if n > 0:
-      result = $parseJson(cast[string](buf[0..<n]))
-    else:
-      result = $(%*{"ok": false, "error": "no response"})
+proc connectDaemon*() =
+  daemonCtrl = newSocket()
+  daemonCtrl.connect(DaemonHost, Port(ControlPort), timeout = 3000)
 
-proc getDaemonSocketPath*(): string =
-  when defined(windows):
-    result = getEnv("APPDATA") & "\\nimmux\\ipc.sock"
-  else:
-    result = getHomeDir() & "/.local/share/nimmux/ipc.sock"
+proc isDaemonConnected*(): bool =
+  daemonCtrl != nil
+
+proc sendCmd(j: JsonNode): JsonNode =
+  daemonCtrl.send($j & "\n")
+  var line = ""
+  daemonCtrl.readLine(line, timeout = 5000)
+  parseJson(line)
+
+# ── DaemonPty type ────────────────────────────────────────────────────────────
+
+type DaemonPty* = ref object
+  sessionId*: int
+  pid*:       int
+  masterFd*:  int   ## always 0 for daemon-backed sessions
+  dataPort:   int
+  data:       Socket
+
+proc spawnSession*(shell, cwd: string; cols = 80'i32; rows = 24'i32): DaemonPty =
+  let resp = sendCmd(%*{"cmd": "spawn", "shell": shell, "cwd": cwd,
+                        "cols": cols, "rows": rows})
+  if not resp{"ok"}.getBool():
+    raise newException(IOError, "daemon spawn failed: " & resp{"error"}.getStr())
+  let id   = resp["sessionId"].getInt()
+  let pid  = resp["pid"].getInt()
+  let port = resp["dataPort"].getInt()
+  var data = newSocket()
+  data.connect(DaemonHost, Port(port), timeout = 3000)
+  DaemonPty(sessionId: id, pid: pid, masterFd: 0, dataPort: port, data: data)
+
+proc attachSession*(sessionId: int): DaemonPty =
+  ## Reconnect to an existing daemon session.
+  let resp = sendCmd(%*{"cmd": "list"})
+  for sess in resp{"sessions"}:
+    if sess["id"].getInt() != sessionId: continue
+    let pid  = sess["pid"].getInt()
+    let port = sess["dataPort"].getInt()
+    var data = newSocket()
+    data.connect(DaemonHost, Port(port), timeout = 3000)
+    return DaemonPty(sessionId: sessionId, pid: pid, masterFd: 0,
+                     dataPort: port, data: data)
+  raise newException(KeyError, "daemon session not found: " & $sessionId)
+
+proc listDaemonSessions*(): seq[tuple[id, pid: int; cwd: string]] =
+  let resp = sendCmd(%*{"cmd": "list"})
+  for sess in resp{"sessions"}:
+    result.add((id: sess["id"].getInt(), pid: sess["pid"].getInt(),
+                cwd: sess["cwd"].getStr()))
+
+# ── DaemonPty interface (mirrors Pty) ─────────────────────────────────────────
+
+proc readAvailable*(dp: DaemonPty; buf: var seq[byte]): int =
+  if dp.data == nil: return 0
+  var data = newString(4096)
+  var n = 0
+  try: n = dp.data.recv(data, 4096, timeout = 0)
+  except TimeoutError: return 0
+  except CatchableError: return 0
+  if n > 0:
+    let before = buf.len
+    buf.setLen(before + n)
+    copyMem(addr buf[before], addr data[0], n)
+  n
+
+proc write*(dp: DaemonPty; data: string) =
+  if data.len == 0 or dp.data == nil: return
+  try: dp.data.send(data) except: discard
+
+proc resize*(dp: DaemonPty; cols, rows: int32) =
+  try:
+    discard sendCmd(%*{"cmd": "resize", "sessionId": dp.sessionId,
+                       "cols": cols, "rows": rows})
+  except: discard
+
+proc isAlive*(dp: DaemonPty): bool =
+  try:
+    let resp = sendCmd(%*{"cmd": "alive", "sessionId": dp.sessionId})
+    resp{"alive"}.getBool()
+  except: false
+
+proc currentCwd*(dp: DaemonPty): string =
+  try:
+    let resp = sendCmd(%*{"cmd": "cwd", "sessionId": dp.sessionId})
+    resp{"cwd"}.getStr("")
+  except: ""
+
+proc close*(dp: DaemonPty) =
+  ## Detach from session — session and shell stay alive in daemon.
+  if dp.data != nil:
+    try: dp.data.close() except: discard
+    dp.data = nil
+
+proc shellPid*(dp: DaemonPty): int = dp.pid

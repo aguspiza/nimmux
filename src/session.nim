@@ -6,9 +6,10 @@ import workspace
 type
   PtyState* = object
     ## Saved PTY state for session persistence
-    pid*: int          ## Child process ID
-    masterFd*: int     ## Master file descriptor (Linux) or handle (Windows)
-    cwd*: string       ## Current working directory
+    pid*:             int    ## Child process ID
+    masterFd*:        int    ## Master file descriptor (Linux/Windows)
+    cwd*:             string ## Current working directory
+    daemonSessionId*: int    ## Daemon session ID (0 = not daemon-backed)
 
   SessionData* = object
     ## Complete session data including workspace and PTY states
@@ -45,7 +46,8 @@ proc ptyStatesToJson*(ptyStates: Table[int, PtyState]): JsonNode =
       "id": %id,
       "pid": %state.pid,
       "masterFd": %state.masterFd,
-      "cwd": %state.cwd
+      "cwd": %state.cwd,
+      "daemonSessionId": %state.daemonSessionId
     })
   %arr  # convert seq to JsonNode array
 
@@ -56,9 +58,10 @@ proc ptyStatesFromJson(n: JsonNode): Table[int, PtyState] =
     for stateJson in n["ptyStates"]:
       let id = stateJson["id"].getInt()
       ptyStates[id] = PtyState(
-        pid: stateJson{"pid"}.getInt(0),
-        masterFd: stateJson{"masterFd"}.getInt(0),
-        cwd: stateJson{"cwd"}.getStr("")
+        pid:             stateJson{"pid"}.getInt(0),
+        masterFd:        stateJson{"masterFd"}.getInt(0),
+        cwd:             stateJson{"cwd"}.getStr(""),
+        daemonSessionId: stateJson{"daemonSessionId"}.getInt(0)
       )
   ptyStates
 
