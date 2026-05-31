@@ -97,6 +97,7 @@ when defined(windows):
     hWrite*: HANDLE
     hRead*:  HANDLE
     pi*:     PROCESS_INFORMATION
+    cwd*:    string  ## Track current working directory
 
   proc ptySpawn*(shell: string; args: seq[string];
                  cols = 80'i32; rows = 24'i32; cwd = ""): Pty =
@@ -137,6 +138,7 @@ when defined(windows):
       wdir = cast[pointer](wdirBuf[0].addr)
     doAssert CreateProcessW(nil, cast[pointer](cmd[0].addr), nil, nil, 0,
       EXTENDED_STARTUPINFO_PRESENT, nil, wdir, addr si, addr result.pi) != 0
+    result.cwd = cwd
 
     DeleteProcThreadAttributeList(attrList)
     dealloc(attrList)
@@ -190,7 +192,7 @@ when defined(windows):
     if pty.pi.hProcess == nil: return false
     WaitForSingleObject(pty.pi.hProcess, 0) == WAIT_TIMEOUT_VAL
 
-  proc currentCwd*(pty: Pty): string = ""
+  proc currentCwd*(pty: Pty): string = pty.cwd
 
 else:  # ── POSIX ────────────────────────────────────────────────────────────────
 
@@ -214,6 +216,7 @@ else:  # ── POSIX ───────────────────�
   type Pty* = object
     master*: cint
     pid*:    Pid
+    cwd*:    string  ## Track current working directory
 
   proc ptySpawn*(shell: string; args: seq[string];
                  cols = 80'i32; rows = 24'i32; cwd = ""): Pty =
@@ -222,6 +225,7 @@ else:  # ── POSIX ───────────────────�
     if openpty(addr master, addr slave, nil, nil, addr ws) != 0:
       raiseOSError(osLastError(), "openpty failed")
     result.master = master
+    result.cwd = cwd
 
     let pid = fork()
     if pid == 0:
@@ -294,6 +298,4 @@ else:  # ── POSIX ───────────────────�
     var status: cint
     waitpid(pty.pid, status, WNOHANG) == 0
 
-  proc currentCwd*(pty: Pty): string =
-    try: expandSymlink("/proc/" & $pty.pid.int & "/cwd")
-    except: ""
+  proc currentCwd*(pty: Pty): string = pty.cwd
