@@ -70,3 +70,20 @@ suite "workspace":
     ws.close(0)
     check ws.root.kind == Leaf
     check ws.root.id == 0
+
+  test "setLeafScrollback and leafScrollback roundtrip":
+    var ws = newWorkspace()
+    ws.setLeafScrollback(0, "hello scrollback")
+    check ws.leafScrollback(0) == "hello scrollback"
+
+  test "leafScrollback returns empty for unknown id":
+    let ws = newWorkspace()
+    check ws.leafScrollback(99) == ""
+
+  test "setLeafScrollback on split tree":
+    var ws = newWorkspace()
+    discard ws.split(0, Vertical)
+    ws.setLeafScrollback(0, "pane0")
+    ws.setLeafScrollback(1, "pane1")
+    check ws.leafScrollback(0) == "pane0"
+    check ws.leafScrollback(1) == "pane1"

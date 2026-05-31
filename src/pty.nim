@@ -2,6 +2,7 @@
 ## Linux: openpty + fork/execvp.  Windows: CreatePseudoConsole (ConPTY).
 
 import std/[os, monotimes, times]
+import session
 
 when defined(windows):
 
@@ -54,6 +55,7 @@ when defined(windows):
     PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = SIZE_T(0x00020016)
     EXTENDED_STARTUPINFO_PRESENT        = DWORD(0x00080000)
     STARTF_USESTDHANDLES                = DWORD(0x00000100)
+    CREATE_NEW_PROCESS_GROUP            = DWORD(0x00000200)
     S_OK                                = HRESULT(0)
     WAIT_TIMEOUT_VAL                    = DWORD(0x00000102)
 
@@ -106,9 +108,23 @@ when defined(windows):
     hWrite*: HANDLE
     hRead*:  HANDLE
     pi*:     PROCESS_INFORMATION
+    pid*:    int        ## Process ID (for session persistence)
+    masterFd*: int      ## Not used on Windows (ConPTY uses HPCON)
 
   proc ptySpawn*(shell: string; args: seq[string];
-                 cols = 80'i32; rows = 24'i32; cwd = ""): Pty =
+                 cols = 80'i32; rows = 24'i32; cwd = ""; ptyState: PtyState = PtyState()): Pty =
+    # If we have a valid PTY state, try to reconnect
+    # On POSIX: reconnect using saved PID and masterFd
+    # On Windows: reconnection not supported (ConPTY uses HPCON which can't be transferred)
+    # For MVP 1.1, we accept that restarting will spawn new shells
+    when not defined(windows):
+      # POSIX: Try to reconnect
+      if ptyState.pid > 0:
+        result = ptyReconnect(ptyState.pid, ptyState.masterFd)
+        if result.isAlive():
+          return result
+    
+    # Spawn a new PTY
     var hPtyIn, hPtyOut, hAppWrite, hAppRead: HANDLE
     doAssert CreatePipe(addr hPtyIn,  addr hAppWrite, nil, 0) != 0
     doAssert CreatePipe(addr hAppRead, addr hPtyOut,  nil, 0) != 0
@@ -145,16 +161,19 @@ when defined(windows):
       wdirBuf = newWideCString(cwd)
       wdir = cast[pointer](wdirBuf[0].addr)
     var ok = CreateProcessW(nil, cast[pointer](cmd[0].addr), nil, nil, 0,
-      EXTENDED_STARTUPINFO_PRESENT, nil, wdir, addr si, addr result.pi)
+      EXTENDED_STARTUPINFO_PRESENT or CREATE_NEW_PROCESS_GROUP, nil, wdir, addr si, addr result.pi)
     if ok == 0 and wdir != nil:
       # stale/incompatible cwd — retry without it
       ok = CreateProcessW(nil, cast[pointer](cmd[0].addr), nil, nil, 0,
-        EXTENDED_STARTUPINFO_PRESENT, nil, nil, addr si, addr result.pi)
+        EXTENDED_STARTUPINFO_PRESENT or CREATE_NEW_PROCESS_GROUP, nil, nil, addr si, addr result.pi)
     if ok == 0:
       raise newException(OSError, "CreateProcessW failed (error " & $GetLastError() & ")")
 
     DeleteProcThreadAttributeList(attrList)
     dealloc(attrList)
+    
+    # Set the pid for session persistence
+    result.pid = result.pi.dwProcessId.int
 
   proc write*(pty: Pty; data: string) =
     if data.len == 0: return
@@ -196,10 +215,9 @@ when defined(windows):
       discard CloseHandle(pty.hWrite); pty.hWrite = nil
     if pty.hRead != nil:
       discard CloseHandle(pty.hRead);  pty.hRead = nil
-    if pty.pi.hProcess != nil:
-      discard TerminateProcess(pty.pi.hProcess, 0)
-      discard CloseHandle(pty.pi.hProcess); pty.pi.hProcess = nil
-      discard CloseHandle(pty.pi.hThread);  pty.pi.hThread  = nil
+    # NOTE: NOT closing process/thread handles - allows session persistence
+    # The process will continue running in the background
+    # We keep hProcess and hThread so isAlive() and reconnection can work
 
   proc isAlive*(pty: Pty): bool =
     if pty.pi.hProcess == nil: return false
@@ -273,9 +291,17 @@ else:  # ── POSIX ───────────────────�
   type Pty* = object
     master*: cint
     pid*:    Pid
+    masterFd*: int  ## Master fd (same as master, for session persistence)
 
   proc ptySpawn*(shell: string; args: seq[string];
-                 cols = 80'i32; rows = 24'i32; cwd = ""): Pty =
+                 cols = 80'i32; rows = 24'i32; cwd = ""; ptyState: PtyState = PtyState()): Pty =
+    # If we have a valid PTY state, try to reconnect
+    if ptyState.pid > 0:
+      result = ptyReconnect(ptyState.pid, ptyState.masterFd)
+      if result.isAlive():
+        return result
+    
+    # Otherwise spawn a new PTY
     var master, slave: cint
     var ws = Winsize(ws_col: cols.uint16, ws_row: rows.uint16)
     if openpty(addr master, addr slave, nil, nil, addr ws) != 0:
@@ -302,6 +328,7 @@ else:  # ── POSIX ───────────────────�
     else:
       discard posix.close(slave)
       result.pid = pid
+      result.masterFd = master
 
   proc write*(pty: Pty; data: string) =
     if data.len > 0:
@@ -339,14 +366,12 @@ else:  # ── POSIX ───────────────────�
     discard ioctl(pty.master, TIOCSWINSZ, addr ws)
 
   proc close*(pty: var Pty) =
+    # NOTE: NOT terminating the process - allows session persistence
+    # The process will continue running in the background
     if pty.master > 0:
       discard posix.close(pty.master)
       pty.master = 0
-    if pty.pid > 0:
-      discard kill(pty.pid, SIGTERM)
-      var status: cint
-      discard waitpid(pty.pid, status, WNOHANG)
-      pty.pid = 0
+    # Don't kill the child process - it continues running
 
   proc isAlive*(pty: Pty): bool =
     if pty.pid <= 0: return false
@@ -356,3 +381,28 @@ else:  # ── POSIX ───────────────────�
   proc currentCwd*(pty: Pty): string =
     try: expandSymlink("/proc/" & $pty.pid.int & "/cwd")
     except: ""
+
+  proc ptyIsReconnectable*(pid: int; masterFd: int): bool =
+    ## Check if a PTY can be reconnected (process exists and handle is valid)
+    ## POSIX: check if process exists and fd is still open
+    if pid <= 0: return false
+    # Check if process exists
+    let procPath = "/proc/" & $pid
+    if not fileExists(procPath): return false
+    # Check if masterFd is still a valid fd (check /proc/pid/fd/)
+    let fdPath = procPath & "/fd/" & $masterFd
+    return fileExists(fdPath)
+
+  proc ptyReconnect*(pid: int; masterFd: int): Pty =
+    ## Reconnect to an existing PTY by PID and master fd
+    ## POSIX: duplicate the master fd and create a new Pty object
+    if pid <= 0 or masterFd < 0:
+      raise newException(ValueError, "Invalid pid or masterFd")
+    
+    # Check if reconnectable
+    if not ptyIsReconnectable(pid, masterFd):
+      raise newException(ValueError, "PTY not reconnectable")
+    
+    result.pid = Pid(pid)
+    result.master = masterFd
+    result.masterFd = masterFd

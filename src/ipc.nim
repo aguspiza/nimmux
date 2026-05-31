@@ -1,96 +1,58 @@
-## IPC socket server.
-## Unix domain socket on Linux, named pipe on Windows.
-## Allows CLI commands like `nimmux notify` to communicate with running instance.
+## IPC client for communicating with the daemon
 
-import std/[os, net, json, monotimes]
-
-when not defined(windows):
-  import std/posix
+import std/[os, json, osproc, strutils]
 
 type
-  IpcMessage* = object
-    cmd*: string
-    args*: seq[string]
-    timestamp*: int64
+  IpcClient* = ref object of RootObj
 
-  IpcServer* = ref object
-    socketPath*: string
-    server*: Socket
-    running*: bool
+proc connectToDaemon*(): IpcClient =
+  ## Connect to the daemon and return a client
+  new(result)
 
-proc getIpcPath*(): string =
+proc sendCommand*(client: IpcClient; cmd: string; args: seq[string] = @[]): string =
+  ## Send a command to the daemon and return the response
+  when defined(windows):
+    # Windows: Use named pipes
+    # TODO: Implement Windows named pipe client
+    return $(%*{"ok": false, "error": "Windows IPC not implemented"})
+  else:
+    # POSIX: Use Unix domain socket
+    let socketPath = getDaemonSocketPath()
+    if not fileExists(socketPath):
+      return $(%*{"ok": false, "error": "daemon not running"})
+    
+    # Create socket and connect
+    var addr: sockaddr_un
+    addr.sun_family = AF_UNIX
+    let pathBytes = socketPath.toUnixPath()
+    copyMem(addr.sun_path, pathBytes, min(pathBytes.len, sizeof(addr.sun_path)))
+    
+    let sock = socket(AF_UNIX, SOCK_STREAM, 0)
+    if sock < 0:
+      return $(%*{"ok": false, "error": "socket creation failed"})
+    
+    if connect(sock, cast[ptr sockaddr](addr.addr), sizeof(addr).socklen_t) < 0:
+      close(sock)
+      return $(%*{"ok": false, "error": "connect failed"})
+    
+    # Send message
+    let msg = %*{"cmd": cmd, "args": args}
+    let msgStr = $msg
+    let msgLen = msgStr.len
+    discard send(sock, msgStr[0].unsafeAddr, msgLen.DWORD, 0)
+    
+    # Receive response
+    var buf: array[4096, byte]
+    let n = recv(sock, buf[0].unsafeAddr, 4096.DWORD, 0)
+    close(sock)
+    
+    if n > 0:
+      result = $parseJson(cast[string](buf[0..<n]))
+    else:
+      result = $(%*{"ok": false, "error": "no response"})
+
+proc getDaemonSocketPath*(): string =
   when defined(windows):
     result = getEnv("APPDATA") & "\\nimmux\\ipc.sock"
   else:
     result = getHomeDir() & "/.local/share/nimmux/ipc.sock"
-
-proc ensureIpcDir*() =
-  let path = getIpcPath()
-  let dir = path.parentDir()
-  if not dir.existsDir():
-    createDir(dir)
-
-proc startIpcServer*(path: string): IpcServer =
-  var server = IpcServer(socketPath: path, running: true)
-  when defined(windows):
-    # TODO: Windows named pipe implementation
-    discard
-  else:
-    if fileExists(path):
-      delFile(path)
-    server.server = newSocket(Domain.AF_UNIX, SockType.SOCK_STREAM, Protocol.IPPROTO_IP)
-    server.server.getFd().SocketHandle.bindUnix(path)
-    server.server.listen(5)
-  return server
-
-proc stopIpcServer*(server: var IpcServer) =
-  server.running = false
-  when not defined(windows):
-    if server.server != nil:
-      server.server.close()
-    if fileExists(server.socketPath):
-      delFile(server.socketPath)
-
-proc parseMessage*(data: string): IpcMessage =
-  try:
-    let j = parseJson(data)
-    result.cmd = j["cmd"].getString()
-    if j.hasKey("args"):
-      for arg in j["args"]:
-        result.args.add(arg.getString())
-    result.timestamp = getMonoTime().inMilliseconds()
-  except:
-    result.cmd = "error"
-    result.args = @[data]
-
-proc handleNotify*(msg: IpcMessage): string =
-  $(%*{"ok": true, "cmd": "notify"})
-
-proc handleSplit*(msg: IpcMessage): string =
-  $(%*{"ok": true, "cmd": "split", "paneId": msg.args[0]})
-
-proc handleCmd*(server: IpcServer; data: string): string =
-  let msg = parseMessage(data)
-  case msg.cmd
-  of "notify": return handleNotify(msg)
-  of "split":  return handleSplit(msg)
-  else:        return $(%*{"ok": false, "error": "unknown command"})
-
-proc acceptConnections*(server: IpcServer; handler: proc(data: string): string) =
-  when defined(windows):
-    discard  # TODO: Windows named pipe
-  else:
-    while server.running:
-      try:
-        var client: Socket
-        var address = ""
-        server.server.acceptAddr(client, address)
-        var buf = newString(4096)
-        let n = client.recv(buf, 4096)
-        if n > 0:
-          buf.setLen(n)
-          let response = handler(buf)
-          client.send(response)
-        client.close()
-      except:
-        continue

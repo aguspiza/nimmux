@@ -10,7 +10,7 @@
 
 import raylib
 import std/[tables, os, osproc, streams, strutils, times]
-import workspace, term, pty, renderer, session
+import workspace, term, pty, renderer, session, daemon
 
 const
   SidebarWidth  = 200.0'f32
@@ -183,6 +183,11 @@ proc getPanePorts(pt: Pty): seq[string] =
         result.add(port)
 
 proc main() =
+  # Ensure daemon is running for PTY persistence
+  ensureDaemonDir()
+  if not fileExists(getDaemonSocketPath()):
+    discard spawnDaemon()
+  
   setTraceLogLevel(TraceLogLevel.Error)
   setConfigFlags(flags(ConfigFlags.VsyncHint, ConfigFlags.WindowResizable))
   initWindow(WinW, WinH, "nimmux")
@@ -195,7 +200,8 @@ proc main() =
   let initRows         = int32(WinH.float32 / initCh)
   let shell            = defaultShell()
 
-  var ws          = loadSession()
+  var sessionData = loadSession()
+  var ws = sessionData.workspace
   var states      = initTable[int, PaneState]()
   var showWelcome = true
   var sidebar     = initSidebar(SidebarWidth)
@@ -207,10 +213,10 @@ proc main() =
     copyMem(data[0].addr, s, size.int)
     ps.pt.write(data)
 
-  proc addPane(id: int; cols, rows: int32; cwd = ""; fontSize = FontSz) =
+  proc addPane(id: int; cols, rows: int32; cwd = ""; fontSize = FontSz; ptyState: PtyState = PtyState()) =
     let ps = PaneState(
       trm:      termNew(cols, rows),
-      pt:       ptySpawn(shell, @[], cols, rows, cwd),
+      pt:       ptySpawn(shell, @[], cols, rows, cwd, ptyState),
       buf:      @[],
       fontSize: fontSize)
     vterm_output_set_callback(ps.trm.vt, onOutput, cast[pointer](ps))
@@ -229,7 +235,7 @@ proc main() =
         break
 
   for id in ws.leaves():
-    addPane(id, initCols, initRows, ws.leafCwd(id))
+    addPane(id, initCols, initRows, ws.leafCwd(id), ptyState = sessionData.ptyStates.getOrDefault(id, PtyState()))
 
   var shouldQuit = false
   var zoomed     = false
@@ -261,7 +267,8 @@ proc main() =
         shouldQuit = true
       else:
         termFree(states[id].trm)
-        states[id].pt.close()
+        # NOTE: NOT closing PTY - processes continue running in background
+        # This allows session restore to reconnect to existing processes
         states.del(id)
         ws.close(id)
 
@@ -398,10 +405,19 @@ proc main() =
 
   for id in ws.leaves():
     ws.setLeafCwd(id, states[id].pt.currentCwd())
-  saveSession(ws)
+  # Save PTY state for each pane
+  var ptyStates = ptyStatesEmpty()
+  for id in ws.leaves():
+    ptyStates[id] = PtyState(
+      pid: states[id].pt.pid,
+      masterFd: states[id].pt.masterFd,
+      cwd: states[id].pt.currentCwd()
+    )
+  saveSession(SessionData(workspace: ws, ptyStates: ptyStates))
   for id in ws.leaves():
     termFree(states[id].trm)
-    states[id].pt.close()
+    # NOTE: NOT closing PTY - processes continue running in background
+    # This allows session restore to reconnect to existing processes
 
   # clean up any running background processes
   for _, p in gitProcs:

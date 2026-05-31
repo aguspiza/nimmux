@@ -12,8 +12,9 @@ type
   Pane* = ref object
     case kind*: PaneKind
     of Leaf:
-      id*:  int
-      cwd*: string
+      id*:         int
+      cwd*:        string
+      scrollback*: string
     of Split:
       dir*:    SplitDir
       ratio*:  float32   ## fraction [0..1] allocated to `first`
@@ -91,6 +92,21 @@ proc setLeafCwd*(ws: var Workspace; id: int; cwd: string) =
 proc leafCwd*(ws: Workspace; id: int): string =
   proc go(p: Pane): string =
     if p.kind == Leaf and p.id == id: return p.cwd
+    elif p.kind == Split:
+      let r = go(p.first)
+      if r.len > 0: return r
+      return go(p.second)
+  go(ws.root)
+
+proc setLeafScrollback*(ws: var Workspace; id: int; scrollback: string) =
+  proc go(p: Pane) =
+    if p.kind == Leaf and p.id == id: p.scrollback = scrollback
+    elif p.kind == Split: go(p.first); go(p.second)
+  go(ws.root)
+
+proc leafScrollback*(ws: Workspace; id: int): string =
+  proc go(p: Pane): string =
+    if p.kind == Leaf and p.id == id: return p.scrollback
     elif p.kind == Split:
       let r = go(p.first)
       if r.len > 0: return r
