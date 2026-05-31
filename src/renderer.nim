@@ -156,37 +156,43 @@ proc drawSidebar*(font: Font; cellH: float32; r: Rect; sb: SidebarState; focused
   drawLine(Vector2(x: r.x + sidebarW, y: r.y), Vector2(x: r.x + sidebarW, y: sh), SidebarBorder)
   
   var y = 8.0'f32
-  let entryH = cellH + 4
-  
-  # Check for mouse click on panes
+  let entryH   = cellH * 2 + 8   # two lines per entry
+  let branchSz = cellH * 0.85'f32
+  # max branch chars that fit between left pad (14) and badge area (20)
+  let charW    = measureText(font, "M", branchSz, 0).x
+  let maxBranchW = sidebarW - 14 - 20
+  let maxBranchChars = max(1, int(maxBranchW / charW))
+
   let mousePos = getMousePosition()
-  
+
   for pane in sb.panes:
     let isFocused = pane.id == focusedId
-    let bgColor = if isFocused: Color(r: 40, g: 50, b: 70, a: 255) else: Color(r: 0, g: 0, b: 0, a: 120)
+    let bgColor = if isFocused: Color(r: 40, g: 50, b: 70, a: 255)
+                  else:         Color(r: 0,  g:  0, b:  0, a: 120)
     let entryRect = Rectangle(x: r.x, y: y, width: sidebarW, height: entryH)
     drawRectangle(entryRect, bgColor)
-    
-    # Check if mouse is over this entry
-    if sidebarW > 0 and checkCollisionPointRec(mousePos, entryRect) and isMouseButtonPressed(MouseButton.Left):
+
+    if sidebarW > 0 and checkCollisionPointRec(mousePos, entryRect) and
+        isMouseButtonPressed(MouseButton.Left):
       result = pane.id
-    
-    # Pane ID
-    let idStr = $pane.id & " "
-    drawText(font, idStr, Vector2(x: r.x + 8, y: y + 2), cellH, 0, SidebarDimText)
-    
-    # CWD (basename only)
+
+    # Line 1: pane ID + CWD basename + notification badge
+    let idStr   = $pane.id
     let cwdName = if pane.cwd.len > 0: extractFilename(pane.cwd) else: "~"
-    drawText(font, cwdName, Vector2(x: r.x + 50, y: y + 2), cellH, 0, SidebarText)
-    
-    # Git branch
-    if pane.branch.len > 0:
-      drawText(font, " (" & pane.branch & ")", Vector2(x: r.x + 160, y: y + 2), cellH, 0, SidebarDimText)
-    
-    # Notification badge
+    drawText(font, idStr,   Vector2(x: r.x + 8,  y: y + 3), cellH, 0, SidebarDimText)
+    let idW = measureText(font, idStr, cellH, 0).x
+    drawText(font, cwdName, Vector2(x: r.x + 8 + idW + 6, y: y + 3), cellH, 0, SidebarText)
+
     if pane.notifCount > 0:
       let badge = $pane.notifCount
-      drawCircle(Vector2(x: r.x + sidebarW - 16, y: y + entryH/2), 10.0'f32, NotifBadgeColor)
-      drawText(font, badge, Vector2(x: r.x + sidebarW - 28, y: y + 2), cellH * 0.75, 0, Color(r: 255, g: 255, b: 255, a: 255))
-    
+      drawCircle(Vector2(x: r.x + sidebarW - 14, y: y + cellH / 2 + 3), 9.0'f32, NotifBadgeColor)
+      drawText(font, badge, Vector2(x: r.x + sidebarW - 22, y: y + 3), cellH * 0.75, 0,
+               Color(r: 255, g: 255, b: 255, a: 255))
+
+    # Line 2: git branch (truncated to fit sidebar width)
+    if pane.branch.len > 0:
+      let branch = if pane.branch.len <= maxBranchChars: pane.branch
+                   else: pane.branch[0 ..< maxBranchChars - 1] & "…"
+      drawText(font, branch, Vector2(x: r.x + 14, y: y + cellH + 6), branchSz, 0, SidebarDimText)
+
     y += entryH + 2

@@ -143,7 +143,8 @@ proc main() =
 
   var shouldQuit = false
   var zoomed     = false
-  var sidebarExpanded = true
+  var sidebarExpanded     = true
+  var prevSidebarExpanded = true
   var prevW = 0.0'f32
   var prevH = 0.0'f32
   while not windowShouldClose() and not shouldQuit:
@@ -257,9 +258,9 @@ proc main() =
       let ports = getPanePorts(states[id].pt)
       sidebar.updatePaneInfo(id, cwd, branch, ports, 0)
 
-    # reflow on window resize
-    if curW != prevW or curH != prevH:
-      prevW = curW; prevH = curH
+    # reflow on window resize or sidebar toggle
+    if curW != prevW or curH != prevH or sidebarExpanded != prevSidebarExpanded:
+      prevW = curW; prevH = curH; prevSidebarExpanded = sidebarExpanded
       let paneW = curW - sidebarW
       for (id, rect) in ws.leafRects(Rect(x: sidebarW, y: 0, w: paneW, h: curH)):
         let (cw, ch) = cellDims(font, states[id].fontSize)
