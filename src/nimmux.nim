@@ -237,7 +237,10 @@ proc main() =
       for (id, rect) in ws.leafRects(Rect(x: sidebarW, y: 0, w: paneW, h: sh)):
         drawPane(font, states[id].fontSize, states[id].trm, rect, id == ws.focused)
     if sidebarExpanded:
-      drawSidebar(font, initCh, Rect(x: 0, y: 0, w: sidebarW, h: sh), sidebar, ws.focused)
+      let clickedPane = drawSidebar(font, initCh, Rect(x: 0, y: 0, w: sidebarW, h: sh), sidebar, ws.focused)
+      if clickedPane != -1:
+        ws.setFocus(clickedPane)
+        showWelcome = false
     if showWelcome:
       drawWelcome(font, initCh, sw, sh)
     endDrawing()

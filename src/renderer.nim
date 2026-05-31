@@ -138,7 +138,9 @@ proc updatePaneInfo*(sb: var SidebarState; id: int; cwd, branch: string;
   sb.panes.add PaneInfo(id: id, cwd: cwd, branch: branch, 
                          ports: ports, notifCount: notifCount)
 
-proc drawSidebar*(font: Font; cellH: float32; r: Rect; sb: SidebarState; focusedId: int) =
+proc drawSidebar*(font: Font; cellH: float32; r: Rect; sb: SidebarState; focusedId: int): int =
+  ## Returns the pane ID under the mouse cursor, or -1 if none
+  result = -1
   let sh = r.y + r.h
   let sidebarW = sb.width
   
@@ -152,10 +154,18 @@ proc drawSidebar*(font: Font; cellH: float32; r: Rect; sb: SidebarState; focused
   var y = 8.0'f32
   let entryH = cellH + 4
   
+  # Check for mouse click on panes
+  let mousePos = getMousePosition()
+  
   for pane in sb.panes:
     let isFocused = pane.id == focusedId
     let bgColor = if isFocused: Color(r: 40, g: 50, b: 70, a: 255) else: Color(r: 0, g: 0, b: 0, a: 120)
-    drawRectangle(Rectangle(x: r.x, y: y, width: sidebarW, height: entryH), bgColor)
+    let entryRect = Rectangle(x: r.x, y: y, width: sidebarW, height: entryH)
+    drawRectangle(entryRect, bgColor)
+    
+    # Check if mouse is over this entry
+    if sidebarW > 0 and checkCollisionPointRec(mousePos, entryRect) and isMouseButtonPressed(MouseButton.Left):
+      result = pane.id
     
     # Pane ID
     let idStr = $pane.id & " "
