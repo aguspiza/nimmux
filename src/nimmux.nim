@@ -263,7 +263,9 @@ proc main() =
   var prevSidebarExpanded = true
   var prevW = 0.0'f32
   var prevH = 0.0'f32
+  var ipcTick = 0  # throttle IPC round-trips to ~1 Hz
   while not windowShouldClose() and not shouldQuit:
+    inc ipcTick
     let ctrl  = isKeyDown(KeyboardKey.LeftControl)  or isKeyDown(KeyboardKey.RightControl)
     let shift = isKeyDown(KeyboardKey.LeftShift)    or isKeyDown(KeyboardKey.RightShift)
 
@@ -385,12 +387,12 @@ proc main() =
         ps.trm.termAdvance(ps.buf.toOpenArray(ps.buf.len - n, ps.buf.len - 1))
         ps.buf.setLen(0)
 
-    # close panes whose shell has exited
+    # close panes whose shell has exited (IPC check ~1 Hz)
     var deadPanes: seq[int]
-    for id in ws.leaves():
-      let alive = states[id].pt.isAlive()
-      if not alive:
-        deadPanes.add(id)
+    if ipcTick mod 60 == 0:
+      for id in ws.leaves():
+        if not states[id].pt.isAlive():
+          deadPanes.add(id)
     for id in deadPanes:
       if ws.leaves().len == 1:
         shouldQuit   = true
@@ -408,15 +410,16 @@ proc main() =
     else:
       pollSsCache()
 
-    # update sidebar info
+    # update sidebar info (~1 Hz to avoid IPC on every frame)
     let curW = getScreenWidth().float32
     let curH = getScreenHeight().float32
     let sidebarW = if sidebarExpanded: SidebarWidth else: 0.0'f32
-    for id in ws.leaves():
-      let cwd = states[id].pt.currentCwd()
-      let branch = getGitBranch(cwd)
-      let ports = getPanePorts(states[id].pt)
-      sidebar.updatePaneInfo(id, cwd, branch, ports, 0)
+    if ipcTick mod 60 == 0:
+      for id in ws.leaves():
+        let cwd = states[id].pt.currentCwd()
+        let branch = getGitBranch(cwd)
+        let ports = getPanePorts(states[id].pt)
+        sidebar.updatePaneInfo(id, cwd, branch, ports, 0)
 
     # reflow on window resize, sidebar toggle, or zoom toggle
     if curW != prevW or curH != prevH or sidebarExpanded != prevSidebarExpanded or zoomed != prevZoomed:

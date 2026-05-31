@@ -201,7 +201,7 @@ proc pollPtyOutput() {.async.} =
       except CatchableError: discard
       sessions.del(id)
 
-    await sleepAsync(1)
+    await sleepAsync(10)
 
 # ── public API ────────────────────────────────────────────────────────────────
 
