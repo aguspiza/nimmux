@@ -206,7 +206,7 @@ proc main() =
     # update sidebar info
     let curW = getScreenWidth().float32
     let curH = getScreenHeight().float32
-    let sidebarW = if sidebarExpanded: SidebarWidth else: SidebarCollapsedWidth
+    let sidebarW = if sidebarExpanded: SidebarWidth else: 0.0'f32
     for id in ws.leaves():
       let cwd = states[id].pt.currentCwd()
       let branch = getGitBranch(cwd)
@@ -236,7 +236,8 @@ proc main() =
     else:
       for (id, rect) in ws.leafRects(Rect(x: sidebarW, y: 0, w: paneW, h: sh)):
         drawPane(font, states[id].fontSize, states[id].trm, rect, id == ws.focused)
-    drawSidebar(font, initCh, Rect(x: 0, y: 0, w: sidebarW, h: sh), sidebar, ws.focused)
+    if sidebarExpanded:
+      drawSidebar(font, initCh, Rect(x: 0, y: 0, w: sidebarW, h: sh), sidebar, ws.focused)
     if showWelcome:
       drawWelcome(font, initCh, sw, sh)
     endDrawing()
