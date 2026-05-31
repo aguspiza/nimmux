@@ -90,6 +90,14 @@ when defined(windows):
   proc WaitForSingleObject(hHandle: HANDLE; dwMilliseconds: DWORD): DWORD
   {.pop.}
 
+  proc ReadProcessMemory(hProcess: HANDLE; lpBase: pointer; lpBuf: pointer;
+                          nSize: SIZE_T; nRead: ptr SIZE_T): BOOL
+    {.importc: "ReadProcessMemory", header: "<windows.h>".}
+
+  proc NtQueryInformationProcess(hProcess: HANDLE; cls: int32; info: pointer;
+                                  infoLen: DWORD; retLen: ptr DWORD): int32
+    {.importc: "NtQueryInformationProcess", dynlib: "ntdll.dll".}
+
   # ── public API (Windows) ──────────────────────────────────────────────────────
 
   type Pty* = object
@@ -190,7 +198,51 @@ when defined(windows):
     if pty.pi.hProcess == nil: return false
     WaitForSingleObject(pty.pi.hProcess, 0) == WAIT_TIMEOUT_VAL
 
-  proc currentCwd*(pty: Pty): string = ""
+  proc shellPid*(pty: Pty): int = pty.pi.dwProcessId.int
+
+  proc currentCwd*(pty: Pty): string =
+    ## Reads the current working directory of the ConPTY child process via PEB.
+    if pty.pi.hProcess == nil: return ""
+    type ProcBasicInfo {.pure.} = object
+      reserved1: pointer
+      pebBase:   pointer
+      reserved2: array[2, pointer]
+      uniquePid: pointer
+      reserved3: pointer
+    try:
+      var pbi: ProcBasicInfo
+      var retLen: DWORD
+      if NtQueryInformationProcess(pty.pi.hProcess, 0,
+          addr pbi, DWORD(sizeof ProcBasicInfo), addr retLen) != 0:
+        return ""
+      # PEB+0x20 → RTL_USER_PROCESS_PARAMETERS*  (x64 offset)
+      var paramsPtr: pointer
+      if ReadProcessMemory(pty.pi.hProcess,
+          cast[pointer](cast[int](pbi.pebBase) + 0x20),
+          addr paramsPtr, SIZE_T(sizeof pointer), nil) == 0:
+        return ""
+      # RTL_USER_PROCESS_PARAMETERS+0x38 → CurrentDirectory.DosPath.Length (u16)
+      # RTL_USER_PROCESS_PARAMETERS+0x40 → CurrentDirectory.DosPath.Buffer  (ptr)
+      var cwdLen: uint16
+      if ReadProcessMemory(pty.pi.hProcess,
+          cast[pointer](cast[int](paramsPtr) + 0x38),
+          addr cwdLen, 2.SIZE_T, nil) == 0 or cwdLen == 0:
+        return ""
+      var cwdBuf: pointer
+      if ReadProcessMemory(pty.pi.hProcess,
+          cast[pointer](cast[int](paramsPtr) + 0x40),
+          addr cwdBuf, SIZE_T(sizeof pointer), nil) == 0 or cwdBuf == nil:
+        return ""
+      var wideBuf = cast[WideCString](alloc0(cwdLen.int + 2))
+      defer: dealloc(wideBuf)
+      if ReadProcessMemory(pty.pi.hProcess, cwdBuf,
+          wideBuf, cwdLen.SIZE_T, nil) == 0:
+        return ""
+      result = $wideBuf
+      if result.len > 3 and result[^1] == '\\':
+        result.setLen(result.len - 1)  # strip trailing backslash Windows adds
+    except:
+      return ""
 
 else:  # ── POSIX ────────────────────────────────────────────────────────────────
 

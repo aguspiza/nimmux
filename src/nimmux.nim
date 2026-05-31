@@ -53,7 +53,45 @@ proc getGitBranch(cwd: string): string =
     result = ""
   gitBranchCache[cwd] = (branch: result, t: now)
 
-when not defined(windows):
+when defined(windows):
+  var winNetstatOut  = ""
+  var winNetstatTime = 0.0
+  var winParentOf    = initTable[int, int]()  # pid → parent pid
+  var winProcMapTime = 0.0
+
+  proc refreshWinNetstat() =
+    let now = epochTime()
+    if now - winNetstatTime < 3.0: return
+    let (o, _) = execCmdEx("netstat.exe -ano 2>nul")
+    winNetstatOut  = o
+    winNetstatTime = now
+
+  proc refreshWinProcMap() =
+    let now = epochTime()
+    if now - winProcMapTime < 3.0: return
+    winParentOf.clear()
+    # wmic gives CSV: Node,ParentProcessId,ProcessId
+    let (csv, code) = execCmdEx("wmic process get ProcessId,ParentProcessId /format:csv 2>nul")
+    if code != 0: return
+    for line in csv.splitLines():
+      let s = line.strip()
+      if s.len == 0 or s.startsWith("Node"): continue
+      let parts = s.split(',')
+      if parts.len < 3: continue
+      let ppid = try: parseInt(parts[1].strip()) except: continue
+      let pid  = try: parseInt(parts[2].strip()) except: continue
+      winParentOf[pid] = ppid
+    winProcMapTime = now
+
+  proc isInFamily(pid, rootPid: int): bool =
+    var cur = pid
+    for _ in 0 ..< 20:
+      if cur == rootPid: return true
+      let p = winParentOf.getOrDefault(cur, -1)
+      if p <= 0 or p == cur: return false
+      cur = p
+
+else:
   var ssCacheOutput = ""
   var ssCacheTime   = 0.0
 
@@ -67,7 +105,21 @@ when not defined(windows):
 
 proc getPanePorts(pt: Pty): seq[string] =
   when defined(windows):
-    @[]
+    let shellPid = pt.shellPid()
+    if shellPid == 0: return @[]
+    refreshWinProcMap()
+    refreshWinNetstat()
+    for line in winNetstatOut.splitLines():
+      if "LISTENING" notin line: continue
+      let parts = line.splitWhitespace()
+      if parts.len < 5: continue
+      let pid = try: parseInt(parts[4]) except: continue
+      if pid != shellPid and not isInFamily(pid, shellPid): continue
+      let colon = parts[1].rfind(':')
+      if colon < 0: continue
+      let port = parts[1][colon + 1 .. ^1]
+      if port.len > 0 and port notin result:
+        result.add(port)
   else:
     let sid = sessionId(pt.pid.int)
     if sid <= 0: return @[]
