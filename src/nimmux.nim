@@ -269,7 +269,9 @@ proc main() =
   var prevMousePos    = getMousePosition()
 
   while not windowShouldClose() and not shouldQuit:
-    pollInputEvents()           # update input state before any isKeyDown/Pressed checks
+    # pollInputEvents() is called either by endDrawing() (dirty frames) or
+    # explicitly below (non-dirty frames). Never both — double-call advances
+    # previousKeyState twice and loses key presses.
     inc ipcTick
 
     let ctrl  = isKeyDown(KeyboardKey.LeftControl)  or isKeyDown(KeyboardKey.RightControl)
@@ -489,7 +491,8 @@ proc main() =
         drawWelcome(font, initCh, sw, sh)
       endDrawing()
     else:
-      waitTime(0.008)  # ~8 ms sleep when nothing to draw
+      pollInputEvents()  # advance input state when skipping endDrawing
+      waitTime(0.002)    # 2 ms — short enough to not miss rapid keystrokes
 
   for id in ws.leaves():
     ws.setLeafCwd(id, states[id].pt.currentCwd())
