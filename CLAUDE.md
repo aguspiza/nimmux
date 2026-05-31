@@ -23,7 +23,7 @@ The Nim port targets Linux and Windows, replacing:
 | ✅ | Shell exit closes pane; last pane exits app |
 | ✅ | Window resize reflows all panes |
 | ✅ | Config — `nimmux.json`, unknown keys ignored |
-| 🔲 | OSC 9/99/777 parser |
+| ✅ | OSC 9/99/777 parser (modular, not yet integrated) |
 | 🔲 | Workspace tabs + sidebar (git branch, CWD, ports, notification badge) |
 | 🔲 | Notification state + panel; `Ctrl+Shift+U` jump to latest unread |
 | 🔲 | IPC socket (gates CLI and hooks) |
