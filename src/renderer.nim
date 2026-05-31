@@ -72,7 +72,7 @@ proc drawPane*(font: Font; fontSize: float32;
 proc drawWelcome*(font: Font; cellH: float32; sw, sh: float32) =
   const
     panelW = 440'f32
-    panelH = 330'f32
+    panelH = 350'f32
     pad    = 28'f32
     rowH   = 28'f32
     hints  = [
@@ -95,7 +95,11 @@ proc drawWelcome*(font: Font; cellH: float32; sw, sh: float32) =
   let titleSz = cellH * 1.6'f32
   drawText(font, "nimmux", Vector2(x: px + pad, y: py + pad), titleSz, 0, FocusBorderColor)
 
-  let sepY = py + pad + titleSz + 10
+  let subtitleSz = cellH * 0.85'f32
+  drawText(font, "keybindings assume US layout (configurable in 1.1)",
+           Vector2(x: px + pad, y: py + pad + titleSz + 2), subtitleSz, 0, WelcomeDimFG)
+
+  let sepY = py + pad + titleSz + subtitleSz + 14
   drawRectangle(Rectangle(x: px + pad, y: sepY, width: panelW - pad * 2, height: 1), BorderColor)
 
   let hintY0 = sepY + 14

@@ -47,6 +47,10 @@ Decisions are recorded in [`docs/adr/`](docs/adr/) using [MADR](https://adr.gith
 - **Session state** — `~/.local/share/nimmux/session.json` on Linux, `%APPDATA%\nimmux\session.json` on Windows.
 - **Config** — `~/.config/nimmux/nimmux.json` on Linux, `%APPDATA%\nimmux\nimmux.json` on Windows. Unknown keys are silently ignored.
 
+## Keybindings
+
+All keybindings currently assume **US keyboard layout** (Raylib `KeyboardKey` is position-based). Symbols like `[`, `]`, `=`, `-` are matched by physical key position, so they differ on non-US keyboards. Configurable keybindings are planned for MVP 1.1 (phase G).
+
 ## Development Environment
 
 **Shell:** Use Git Bash (Bash tool) for all shell commands on Windows — not PowerShell.
