@@ -87,7 +87,7 @@ proc drawWelcome*(font: Font; cellH: float32; sw, sh: float32) =
       ("Ctrl+W",        "close pane"),
       ("Ctrl+=",        "increase font size"),
       ("Ctrl+-",        "decrease font size"),
-      ("Ctrl+Z",        "zoom focused pane"),
+      ("Ctrl+F",        "zoom focused pane"),
     ]
 
   let px = (sw - panelW) * 0.5'f32

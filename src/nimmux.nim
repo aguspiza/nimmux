@@ -6,7 +6,7 @@
 ## Ctrl+W           close pane
 ## Ctrl+=           increase font size
 ## Ctrl+-           decrease font size
-## Ctrl+Z           zoom focused pane (toggle)
+## Ctrl+F           zoom focused pane (toggle)
 
 import raylib
 import std/[tables, os, osproc, streams, strutils, times]
@@ -265,8 +265,8 @@ proc main() =
         states.del(id)
         ws.close(id)
 
-    # zoom focused pane: Ctrl+Z toggles full-screen for the active pane
-    if ctrl and isKeyPressed(KeyboardKey.Z):
+    # zoom focused pane: Ctrl+F toggles full-screen for the active pane
+    if ctrl and isKeyPressed(KeyboardKey.F):
       zoomed = not zoomed
 
     # toggle sidebar: Ctrl+Shift+S
