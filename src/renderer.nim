@@ -139,12 +139,12 @@ proc updatePaneInfo*(sb: var SidebarState; id: int; cwd, branch: string;
                          ports: ports, notifCount: notifCount)
 
 proc drawSidebar*(font: Font; cellH: float32; r: Rect; sb: SidebarState; focusedId: int) =
-  let sw = r.x + r.w
   let sh = r.y + r.h
+  let sidebarW = sb.width
   
-  # Background
-  drawRectangle(Rectangle(x: sw - sb.width, y: r.y, width: sb.width, height: sh), Color(r: 24, g: 24, b: 32, a: 255))
-  drawRectangleLines(Rectangle(x: sw - sb.width, y: r.y, width: sb.width, height: sh), 1.0'f32, SidebarBorder)
+  # Background (left side)
+  drawRectangle(Rectangle(x: r.x, y: r.y, width: sidebarW, height: sh), Color(r: 24, g: 24, b: 32, a: 255))
+  drawRectangleLines(Rectangle(x: r.x, y: r.y, width: sidebarW, height: sh), 1.0'f32, SidebarBorder)
   
   var y = 8.0'f32
   let entryH = cellH + 4
@@ -152,24 +152,24 @@ proc drawSidebar*(font: Font; cellH: float32; r: Rect; sb: SidebarState; focused
   for pane in sb.panes:
     let isFocused = pane.id == focusedId
     let bgColor = if isFocused: Color(r: 40, g: 50, b: 70, a: 255) else: Color(r: 0, g: 0, b: 0, a: 120)
-    drawRectangle(Rectangle(x: sw - sb.width, y: y, width: sb.width, height: entryH), bgColor)
+    drawRectangle(Rectangle(x: r.x, y: y, width: sidebarW, height: entryH), bgColor)
     
     # Pane ID
     let idStr = $pane.id & " "
-    drawText(font, idStr, Vector2(x: sw - sb.width + 8, y: y + 2), cellH, 0, SidebarDimText)
+    drawText(font, idStr, Vector2(x: r.x + 8, y: y + 2), cellH, 0, SidebarDimText)
     
     # CWD (basename only)
     let cwdName = if pane.cwd.len > 0: extractFilename(pane.cwd) else: "~"
-    drawText(font, cwdName, Vector2(x: sw - sb.width + 50, y: y + 2), cellH, 0, SidebarText)
+    drawText(font, cwdName, Vector2(x: r.x + 50, y: y + 2), cellH, 0, SidebarText)
     
     # Git branch
     if pane.branch.len > 0:
-      drawText(font, " (" & pane.branch & ")", Vector2(x: sw - sb.width + 160, y: y + 2), cellH, 0, SidebarDimText)
+      drawText(font, " (" & pane.branch & ")", Vector2(x: r.x + 160, y: y + 2), cellH, 0, SidebarDimText)
     
     # Notification badge
     if pane.notifCount > 0:
       let badge = $pane.notifCount
-      drawCircle(Vector2(x: sb.width - 16, y: y + entryH/2), 10.0'f32, NotifBadgeColor)
-      drawText(font, badge, Vector2(x: sb.width - 28, y: y + 2), cellH * 0.75, 0, Color(r: 255, g: 255, b: 255, a: 255))
+      drawCircle(Vector2(x: r.x + sidebarW - 16, y: y + entryH/2), 10.0'f32, NotifBadgeColor)
+      drawText(font, badge, Vector2(x: r.x + sidebarW - 28, y: y + 2), cellH * 0.75, 0, Color(r: 255, g: 255, b: 255, a: 255))
     
     y += entryH + 2

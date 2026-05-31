@@ -14,6 +14,7 @@ import workspace, term, pty, renderer, session
 
 const
   SidebarWidth = 200.0'f32
+  SidebarCollapsedWidth = 40.0'f32
 
 type PaneState = ref object
   trm:      Terminal
@@ -98,6 +99,7 @@ proc main() =
 
   var shouldQuit = false
   var zoomed     = false
+  var sidebarExpanded = true
   var prevW = 0.0'f32
   var prevH = 0.0'f32
   while not windowShouldClose() and not shouldQuit:
@@ -130,6 +132,10 @@ proc main() =
     # zoom focused pane: Ctrl+Z toggles full-screen for the active pane
     if ctrl and isKeyPressed(KeyboardKey.Z):
       zoomed = not zoomed
+
+    # toggle sidebar: Ctrl+Shift+S
+    if ctrl and shift and isKeyPressed(KeyboardKey.S):
+      sidebarExpanded = not sidebarExpanded
 
     # font size: Ctrl+= increase  Ctrl+- decrease
     if ctrl and isKeyPressed(KeyboardKey.Equal):
@@ -200,6 +206,7 @@ proc main() =
     # update sidebar info
     let curW = getScreenWidth().float32
     let curH = getScreenHeight().float32
+    let sidebarW = if sidebarExpanded: SidebarWidth else: SidebarCollapsedWidth
     for id in ws.leaves():
       let cwd = states[id].pt.currentCwd()
       let branch = getGitBranch(cwd)
@@ -209,7 +216,7 @@ proc main() =
     # reflow on window resize
     if curW != prevW or curH != prevH:
       prevW = curW; prevH = curH
-      let paneW = curW - SidebarWidth
+      let paneW = curW - sidebarW
       for (id, rect) in ws.leafRects(Rect(x: 0, y: 0, w: paneW, h: curH)):
         let (cw, ch) = cellDims(font, states[id].fontSize)
         let ncols = max(1'i32, int32(rect.w / cw))
@@ -222,7 +229,7 @@ proc main() =
     clearBackground(Color(r: 20, g: 20, b: 20, a: 255))
     let sw = getScreenWidth().float32
     let sh = getScreenHeight().float32
-    let paneW = sw - SidebarWidth
+    let paneW = sw - sidebarW
     if zoomed:
       drawPane(font, states[ws.focused].fontSize, states[ws.focused].trm,
                Rect(x: 0, y: 0, w: paneW, h: sh), true)
