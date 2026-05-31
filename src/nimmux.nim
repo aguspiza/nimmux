@@ -4,20 +4,28 @@
 ## Ctrl+Shift+]     next pane
 ## Ctrl+Shift+[     previous pane
 ## Ctrl+W           close pane
+## Ctrl+=           increase font size
+## Ctrl+-           decrease font size
+## Ctrl+Z           zoom focused pane (toggle)
 
 import raylib
 import std/[tables, os]
 import workspace, term, pty, renderer, session
 
 type PaneState = ref object
-  trm: Terminal
-  pt:  Pty
-  buf: seq[byte]
+  trm:      Terminal
+  pt:       Pty
+  buf:      seq[byte]
+  fontSize: float32
 
 const
-  WinW   = 1280
-  WinH   = 720
-  FontSz = 16'f32
+  WinW     = 1280
+  WinH     = 720
+  FontSz   = 16'f32   ## default per-pane font size
+  FontMin  = 8'f32
+  FontMax  = 32'f32
+  FontStep = 2'f32
+  BaseFontSz = 64'i32 ## load atlas at this size for quality at all zoom levels
 
 proc defaultShell(): string =
   when defined(windows):
@@ -33,11 +41,11 @@ proc main() =
   initWindow(WinW, WinH, "nimmux")
   setTargetFPS(60)
 
-  let font     = loadTermFont(FontSz.int32)
-  let (cw, ch) = cellDims(font, FontSz)
-  let initCols = int32(WinW.float32 / cw)
-  let initRows = int32(WinH.float32 / ch)
-  let shell    = defaultShell()
+  let font            = loadTermFont(BaseFontSz)
+  let (initCw, initCh) = cellDims(font, FontSz)
+  let initCols        = int32(WinW.float32 / initCw)
+  let initRows        = int32(WinH.float32 / initCh)
+  let shell           = defaultShell()
 
   var ws          = loadSession()
   var states      = initTable[int, PaneState]()
@@ -50,18 +58,32 @@ proc main() =
     copyMem(data[0].addr, s, size.int)
     ps.pt.write(data)
 
-  proc addPane(id: int; cols, rows: int32; cwd = "") =
+  proc addPane(id: int; cols, rows: int32; cwd = ""; fontSize = FontSz) =
     let ps = PaneState(
-      trm: termNew(cols, rows),
-      pt:  ptySpawn(shell, @[], cols, rows, cwd),
-      buf: @[])
+      trm:      termNew(cols, rows),
+      pt:       ptySpawn(shell, @[], cols, rows, cwd),
+      buf:      @[],
+      fontSize: fontSize)
     vterm_output_set_callback(ps.trm.vt, onOutput, cast[pointer](ps))
     states[id] = ps
+
+  proc reflowPane(id: int) =
+    let sw = getScreenWidth().float32
+    let sh = getScreenHeight().float32
+    for (pid, rect) in ws.leafRects(Rect(x: 0, y: 0, w: sw, h: sh)):
+      if pid == id:
+        let (cw, ch) = cellDims(font, states[id].fontSize)
+        let ncols = max(1'i32, int32(rect.w / cw))
+        let nrows = max(1'i32, int32(rect.h / ch))
+        states[id].trm.termResize(ncols, nrows)
+        states[id].pt.resize(ncols, nrows)
+        break
 
   for id in ws.leaves():
     addPane(id, initCols, initRows, ws.leafCwd(id))
 
   var shouldQuit = false
+  var zoomed     = false
   var prevW = getScreenWidth()
   var prevH = getScreenHeight()
   while not windowShouldClose() and not shouldQuit:
@@ -70,12 +92,13 @@ proc main() =
 
     # split
     if ctrl and isKeyPressed(KeyboardKey.D):
-      let dir   = if shift: Horizontal else: Vertical
-      let ps    = states[ws.focused]
-      let newId = ws.split(ws.focused, dir)
-      let ncols = if dir == Vertical:   ps.trm.cols div 2 else: ps.trm.cols
-      let nrows = if dir == Horizontal: ps.trm.rows div 2 else: ps.trm.rows
-      addPane(newId, ncols, nrows)
+      let dir      = if shift: Horizontal else: Vertical
+      let focusFs  = states[ws.focused].fontSize
+      let ps       = states[ws.focused]
+      let newId    = ws.split(ws.focused, dir)
+      let ncols    = if dir == Vertical:   ps.trm.cols div 2 else: ps.trm.cols
+      let nrows    = if dir == Horizontal: ps.trm.rows div 2 else: ps.trm.rows
+      addPane(newId, ncols, nrows, fontSize = focusFs)
       ws.setFocus(newId)
       showWelcome = false
 
@@ -85,12 +108,22 @@ proc main() =
       if ws.leaves().len == 1:
         shouldQuit = true
       else:
-        var ps = states[id]
-        ps.pt.close()
-        var t = ps.trm
-        termFree(t)
+        termFree(states[id].trm)
+        states[id].pt.close()
         states.del(id)
         ws.close(id)
+
+    # zoom focused pane: Ctrl+Z toggles full-screen for the active pane
+    if ctrl and isKeyPressed(KeyboardKey.Z):
+      zoomed = not zoomed
+
+    # font size: Ctrl+= increase  Ctrl+- decrease
+    if ctrl and isKeyPressed(KeyboardKey.Equal):
+      states[ws.focused].fontSize = min(FontMax, states[ws.focused].fontSize + FontStep)
+      reflowPane(ws.focused)
+    if ctrl and isKeyPressed(KeyboardKey.Minus):
+      states[ws.focused].fontSize = max(FontMin, states[ws.focused].fontSize - FontStep)
+      reflowPane(ws.focused)
 
     # cycle focus: Ctrl+Shift+] / Ctrl+Shift+[
     if ctrl and shift:
@@ -156,6 +189,7 @@ proc main() =
     if curW != prevW or curH != prevH:
       prevW = curW; prevH = curH
       for (id, rect) in ws.leafRects(Rect(x: 0, y: 0, w: curW.float32, h: curH.float32)):
+        let (cw, ch) = cellDims(font, states[id].fontSize)
         let ncols = max(1'i32, int32(rect.w / cw))
         let nrows = max(1'i32, int32(rect.h / ch))
         states[id].trm.termResize(ncols, nrows)
@@ -166,10 +200,14 @@ proc main() =
     clearBackground(Color(r: 20, g: 20, b: 20, a: 255))
     let sw = getScreenWidth().float32
     let sh = getScreenHeight().float32
-    for (id, rect) in ws.leafRects(Rect(x: 0, y: 0, w: sw, h: sh)):
-      drawPane(font, cw, ch, states[id].trm, rect, id == ws.focused)
+    if zoomed:
+      drawPane(font, states[ws.focused].fontSize, states[ws.focused].trm,
+               Rect(x: 0, y: 0, w: sw, h: sh), true)
+    else:
+      for (id, rect) in ws.leafRects(Rect(x: 0, y: 0, w: sw, h: sh)):
+        drawPane(font, states[id].fontSize, states[id].trm, rect, id == ws.focused)
     if showWelcome:
-      drawWelcome(font, ch, sw, sh)
+      drawWelcome(font, initCh, sw, sh)
     endDrawing()
 
   for id in ws.leaves():

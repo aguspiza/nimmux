@@ -35,8 +35,9 @@ proc cellDims*(font: Font; fontSize: float32): (float32, float32) =
   let m = measureText(font, "M", fontSize, 0)
   (m.x, m.y)
 
-proc drawPane*(font: Font; cellW, cellH: float32;
+proc drawPane*(font: Font; fontSize: float32;
                t: Terminal; r: Rect; focused: bool) =
+  let (cellW, cellH) = cellDims(font, fontSize)
   let cols = int(r.w / cellW)
   let rows = int(r.h / cellH)
 
@@ -69,7 +70,7 @@ proc drawPane*(font: Font; cellW, cellH: float32;
 proc drawWelcome*(font: Font; cellH: float32; sw, sh: float32) =
   const
     panelW = 440'f32
-    panelH = 246'f32
+    panelH = 330'f32
     pad    = 28'f32
     rowH   = 28'f32
     hints  = [
@@ -78,6 +79,9 @@ proc drawWelcome*(font: Font; cellH: float32; sw, sh: float32) =
       ("Ctrl+Shift+]",  "next pane"),
       ("Ctrl+Shift+[",  "previous pane"),
       ("Ctrl+W",        "close pane"),
+      ("Ctrl+=",        "increase font size"),
+      ("Ctrl+-",        "decrease font size"),
+      ("Ctrl+Z",        "zoom focused pane"),
     ]
 
   let px = (sw - panelW) * 0.5'f32
