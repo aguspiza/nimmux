@@ -209,7 +209,7 @@ proc main() =
   var sessionData = loadSession()
   var ws = sessionData.workspace
   var states      = initTable[int, PaneState]()
-  var showWelcome = true
+  var showWelcome = not sessionData.hasDaemonSessions()
   var sidebar     = initSidebar(SidebarWidth)
 
   proc onOutput(s: ConstCStr; size: uint64; user: pointer) {.cdecl.} =

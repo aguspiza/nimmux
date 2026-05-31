@@ -143,3 +143,23 @@ suite "session":
     let loaded = loadSession(path)
     check loaded.workspace.leafScrollback(0) == "saved scrollback"
     removeFile(path)
+
+  test "hasDaemonSessions false when no pty states":
+    check not SessionData(workspace: newWorkspace(),
+                          ptyStates: ptyStatesEmpty()).hasDaemonSessions()
+
+  test "hasDaemonSessions false when all daemonSessionId are -1":
+    var pts: Table[int, PtyState] = initTable[int, PtyState]()
+    pts[0] = PtyState(pid: 1, masterFd: 3, cwd: "", daemonSessionId: -1)
+    check not SessionData(workspace: newWorkspace(), ptyStates: pts).hasDaemonSessions()
+
+  test "hasDaemonSessions true when any daemonSessionId is zero":
+    var pts: Table[int, PtyState] = initTable[int, PtyState]()
+    pts[0] = PtyState(pid: 1, masterFd: 3, cwd: "", daemonSessionId: 0)
+    check SessionData(workspace: newWorkspace(), ptyStates: pts).hasDaemonSessions()
+
+  test "hasDaemonSessions true when any daemonSessionId is positive":
+    var pts: Table[int, PtyState] = initTable[int, PtyState]()
+    pts[0] = PtyState(pid: 1, masterFd: 3, cwd: "", daemonSessionId: -1)
+    pts[1] = PtyState(pid: 2, masterFd: 4, cwd: "", daemonSessionId: 5)
+    check SessionData(workspace: newWorkspace(), ptyStates: pts).hasDaemonSessions()

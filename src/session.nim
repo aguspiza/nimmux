@@ -97,3 +97,8 @@ proc loadSession*(): SessionData =
   loadSession(defaultSessionPath())
 
 proc ptyStatesEmpty*(): Table[int, PtyState] = initTable[int, PtyState]()
+
+proc hasDaemonSessions*(sd: SessionData): bool =
+  for _, ps in sd.ptyStates:
+    if ps.daemonSessionId >= 0: return true
+  false
