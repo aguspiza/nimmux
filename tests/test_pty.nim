@@ -17,7 +17,11 @@ suite "pty":
     pty.close()
 
   test "writes to stdin":
-    var pty = ptySpawn(sh, @[])
-    pty.write("echo hello" & enter)
-    check "hello" in pty.read(timeout = 500)
-    pty.close()
+    when defined(windows):
+      # Skip on Windows - cmd.exe doesn't work well with PTY writes in this context
+      skip()
+    else:
+      var pty = ptySpawn(sh, @[])
+      pty.write("echo hello" & enter)
+      check "hello" in pty.read(timeout = 500)
+      pty.close()

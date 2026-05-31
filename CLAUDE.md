@@ -19,20 +19,44 @@ The Nim port targets Linux and Windows, replacing:
 |--|---------|
 | ✅ | Split panes — `Ctrl+D` vertical, `Ctrl+Shift+D` horizontal, `Ctrl+W` close |
 | ✅ | Pane focus — `Ctrl+Shift+]` / `Ctrl+Shift+[` |
-| ✅ | Session restore — layout + per-pane CWD |
-| ✅ | Shell exit closes pane; last pane exits app |
+| ✅ | **Processes persist on close** (PTYs not terminated, session saved) |
+| ⚠️ | Shell exit closes pane; last pane exits app |
 | ✅ | Window resize reflows all panes |
 | ✅ | Config — `nimmux.json`, unknown keys ignored |
 | ✅ | Sidebar toggle — `Ctrl+Shift+S` collapse/expand (hidden when collapsed) |
-| ✅ | OSC 9/99/777 parser (modular, not yet integrated) |
-| ✅ | Workspace tabs + sidebar (git branch, CWD, notification badge, LEFT side, click to focus) |
-| 🔲 | Notification state + panel; `Ctrl+Shift+U` jump to latest unread |
-| 🔲 | IPC socket (gates CLI and hooks) |
+| ⚠️ | OSC 9/99/777 parser (modular, not yet integrated) |
+| ⚠️ | Workspace tabs + sidebar (git branch, CWD, notification badge, LEFT side, click to focus) |
+| ⚠️ | Notification state (parser integrated, no UI panel yet) |
+| ⚠️ | Jump-to-unread — `Ctrl+Shift+U` (implemented, needs pane highlight) |
+| 🔲 | **IPC socket** (gates CLI and hooks) |
 | 🔲 | CLI — `nimmux notify`, `nimmux split`, `nimmux hooks setup [agent]` |
 | 🔲 | Hooks — resume hooks for Claude Code, Codex, OpenCode |
 | ⬜ | In-app browser (scriptable: click, fill, JS eval) |
 | ⬜ | SSH workspaces — `nimmux ssh user@remote` |
 | ⬜ | Claude Code Teams — `nimmux claude-teams` |
+
+### PTY Persistence (MVP 1.1)
+
+**Current behavior:**
+- **Start nimmux** → Shell spawns with PID X
+- **Close nimmux** → Shell persists (PID X continues running)
+- **Restart nimmux** → New shell spawns with PID Y
+
+**Windows limitation:** ConPTY uses HPCON handles which cannot be transferred between processes. This means:
+- Old shells continue running (not killed) ✅
+- New shells are spawned on restart (not reconnected) ⚠️
+
+**For true session persistence on Windows**, we need the daemon architecture where:
+- Daemon owns PTY processes
+- Main app connects via IPC
+- Daemon can reconnect to existing PTYs
+
+**Daemon architecture** (`src/daemon.nim`):
+- `nimmux-daemon.exe` is now built
+- Separate process for PTY management
+- IPC socket server (Unix socket on Linux, named pipe on Windows)
+- Currently: Infrastructure ready, PTY management not yet integrated
+- Future: Main app delegates PTY spawning to daemon
 
 ## Architecture Decision Records
 
