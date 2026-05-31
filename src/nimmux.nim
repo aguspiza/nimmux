@@ -209,6 +209,11 @@ proc main() =
   let shell            = defaultShell()
 
   var sessionData = loadSession()
+  # Only restore the saved layout when reconnecting; a fresh daemon has no
+  # live sessions to attach to, so restoring a split just spawns N identical shells.
+  if not daemonWasRunning:
+    sessionData = SessionData(workspace: newWorkspace(),
+                              ptyStates: ptyStatesEmpty())
   var ws = sessionData.workspace
   var states      = initTable[int, PaneState]()
   var showWelcome = not daemonWasRunning

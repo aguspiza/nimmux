@@ -57,43 +57,22 @@ suite "pty_persistence":
     pty.close()
   
   test "User workflow: start shell, close app, shell persists":
-    # This test simulates the user's actual workflow:
-    # 1. Start nimmux (which spawns a shell)
-    # 2. Close nimmux
-    # 3. Shell process should still be running
-    
-    # Spawn a shell PTY
+    # On Windows: ConPTY keeps the process alive after close().
+    # On Linux: closing the master PTY fd sends SIGHUP; the shell exits.
+    #   Session persistence on Linux is the daemon's job (it keeps the master
+    #   fd open). At the PTY layer alone, the process is expected to die.
     var pty = ptySpawn(sh, @[])
     let pid = pty.pid
-    
-    # Verify the process is alive
     check pty.isAlive()
-    
-    # Get the current working directory
     let cwd = pty.currentCwd()
     check cwd.len > 0
-    
-    # Save the PTY state (simulating session save on exit)
-    let savedState = PtyState(
-      pid: pid,
-      masterFd: pty.masterFd,
-      cwd: cwd
-    )
+    let savedState = PtyState(pid: pid, masterFd: pty.masterFd, cwd: cwd)
     check savedState.pid == pid
-    
-    # Close the PTY (simulating app exit)
     pty.close()
-    
-    # Verify the process is still running after PTY close
     sleep(200)
-    
-    # Check if the process is still running
     when defined(windows):
       let tasklistOutput = execCmd("tasklist /FI \"PID eq " & $pid)
       check tasklistOutput == 0
-    else:
-      let procPath = "/proc/" & $pid
-      check fileExists(procPath)
   
   test "PTY state saves correct PID":
     # This test verifies that the PID saved in PtyState matches the actual PTY PID
@@ -159,34 +138,18 @@ suite "pty_persistence":
       check tasklistOutput == 0  # Process should still be running
   
   test "PTY reconnection with valid state":
-    # This test verifies that ptySpawn attempts to reconnect when given a valid PID
+    # PTY-level reconnection was removed; session persistence is now handled
+    # by the daemon which keeps the master fd open across app restarts.
+    # ptySpawn with a saved state always spawns a fresh process.
     var pty = ptySpawn(sh, @[])
     let pid = pty.pid
     let masterFd = pty.masterFd
-    
-    # Save the state
     let savedState = PtyState(pid: pid, masterFd: masterFd, cwd: pty.currentCwd())
-    
-    # Close the PTY
     pty.close()
-    
-    # Give it a moment
     sleep(200)
-    
-    # Try to spawn with the saved state - should reconnect on POSIX
-    when not defined(windows):
-      # On POSIX, reconnection should work
-      var pty2 = ptySpawn(sh, @[], ptyState = savedState)
-      # If reconnection worked, we should have the same PID
-      check pty2.pid == pid
-      pty2.close()
-    else:
-      # On Windows, reconnection via masterFd doesn't work (ConPTY uses HPCON)
-      # So a new PTY will be spawned
-      var pty2 = ptySpawn(sh, @[], ptyState = savedState)
-      # This is expected behavior - we get a new PID
-      check pty2.pid > 0
-      pty2.close()
+    var pty2 = ptySpawn(sh, @[], ptyState = savedState)
+    check pty2.pid > 0
+    pty2.close()
   
   test "End-to-end: kill existing shells before test":
     # This test ensures we start with a clean state
@@ -213,14 +176,11 @@ suite "pty_persistence":
     # Close PTY
     pty.close()
     
-    # Verify process still exists
+    # On Windows the process survives close(); on Linux it exits via SIGHUP.
     sleep(200)
     when defined(windows):
       let tasklistOutput = execCmd("tasklist /FI \"PID eq " & $pid)
       check tasklistOutput == 0
-    else:
-      let procPath = "/proc/" & $pid
-      check fileExists(procPath)
     
     # Clean up
     when defined(windows):
