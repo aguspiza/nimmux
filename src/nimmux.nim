@@ -255,19 +255,35 @@ proc main() =
     addPane(id, initCols, initRows, saved.cwd,
             savedDaemonId = if saved.daemonSessionId >= 0: saved.daemonSessionId else: -1)
 
-  var shouldQuit    = false
-  var shellsExited  = false  # true only when last pane shell exited (not window close)
-  var zoomed        = false
-  var prevZoomed = false
-  var sidebarExpanded     = true
+  var shouldQuit      = false
+  var shellsExited    = false
+  var zoomed          = false
+  var prevZoomed      = false
+  var sidebarExpanded = true
   var prevSidebarExpanded = true
-  var prevW = 0.0'f32
-  var prevH = 0.0'f32
-  var ipcTick = 0  # throttle IPC round-trips to ~1 Hz
+  var prevW           = 0.0'f32
+  var prevH           = 0.0'f32
+  var ipcTick         = 0
+  var dirty           = true   # first frame always renders
+  var lastRenderTime  = 0.0    # epochTime of last render (for cursor blink)
+  var prevMousePos    = getMousePosition()
+
   while not windowShouldClose() and not shouldQuit:
+    pollInputEvents()           # update input state before any isKeyDown/Pressed checks
     inc ipcTick
+
     let ctrl  = isKeyDown(KeyboardKey.LeftControl)  or isKeyDown(KeyboardKey.RightControl)
     let shift = isKeyDown(KeyboardKey.LeftShift)    or isKeyDown(KeyboardKey.RightShift)
+
+    # mark dirty on any keyboard or mouse input
+    if getKeyPressed() != KeyboardKey.Null or
+       isMouseButtonPressed(MouseButton.Left) or isMouseButtonReleased(MouseButton.Left) or
+       isMouseButtonPressed(MouseButton.Right) or isMouseButtonReleased(MouseButton.Right):
+      dirty = true
+    let curMousePos = getMousePosition()
+    if curMousePos.x != prevMousePos.x or curMousePos.y != prevMousePos.y:
+      dirty = true
+      prevMousePos = curMousePos
 
     # split
     if ctrl and isKeyPressed(KeyboardKey.D):
@@ -386,6 +402,7 @@ proc main() =
       if n > 0:
         ps.trm.termAdvance(ps.buf.toOpenArray(ps.buf.len - n, ps.buf.len - 1))
         ps.buf.setLen(0)
+        dirty = true
 
     # close panes whose shell has exited (IPC check ~1 Hz)
     var deadPanes: seq[int]
@@ -402,6 +419,7 @@ proc main() =
       states[id].pt.close()
       states.del(id)
       ws.close(id)
+      dirty = true
 
     # poll background subprocesses (never blocks)
     when defined(windows):
@@ -420,9 +438,11 @@ proc main() =
         let branch = getGitBranch(cwd)
         let ports = getPanePorts(states[id].pt)
         sidebar.updatePaneInfo(id, cwd, branch, ports, 0)
+      dirty = true  # sidebar info refreshed
 
     # reflow on window resize, sidebar toggle, or zoom toggle
     if curW != prevW or curH != prevH or sidebarExpanded != prevSidebarExpanded or zoomed != prevZoomed:
+      dirty = true
       prevW = curW; prevH = curH; prevSidebarExpanded = sidebarExpanded; prevZoomed = zoomed
       let paneW = curW - sidebarW
       if zoomed:
@@ -440,26 +460,36 @@ proc main() =
           states[id].trm.termResize(ncols, nrows)
           states[id].pt.resize(ncols, nrows)
 
-    # render
-    beginDrawing()
-    clearBackground(Color(r: 20, g: 20, b: 20, a: 255))
-    let sw = getScreenWidth().float32
-    let sh = getScreenHeight().float32
-    let paneW = sw - sidebarW
-    if zoomed:
-      drawPane(font, states[ws.focused].fontSize, states[ws.focused].trm,
-               Rect(x: sidebarW, y: 0, w: paneW, h: sh), true)
+    # cursor blink: force a redraw every 500 ms even when otherwise idle
+    let now = epochTime()
+    if now - lastRenderTime >= 0.5:
+      dirty = true
+
+    if dirty:
+      dirty = false
+      lastRenderTime = epochTime()
+      beginDrawing()
+      clearBackground(Color(r: 20, g: 20, b: 20, a: 255))
+      let sw = getScreenWidth().float32
+      let sh = getScreenHeight().float32
+      let paneW = sw - sidebarW
+      if zoomed:
+        drawPane(font, states[ws.focused].fontSize, states[ws.focused].trm,
+                 Rect(x: sidebarW, y: 0, w: paneW, h: sh), true)
+      else:
+        for (id, rect) in ws.leafRects(Rect(x: sidebarW, y: 0, w: paneW, h: sh)):
+          drawPane(font, states[id].fontSize, states[id].trm, rect, id == ws.focused)
+      if sidebarExpanded:
+        let clickedPane = drawSidebar(font, initCh, Rect(x: 0, y: 0, w: sidebarW, h: sh), sidebar, ws.focused)
+        if clickedPane != -1:
+          ws.setFocus(clickedPane)
+          showWelcome = false
+          dirty = true
+      if showWelcome:
+        drawWelcome(font, initCh, sw, sh)
+      endDrawing()
     else:
-      for (id, rect) in ws.leafRects(Rect(x: sidebarW, y: 0, w: paneW, h: sh)):
-        drawPane(font, states[id].fontSize, states[id].trm, rect, id == ws.focused)
-    if sidebarExpanded:
-      let clickedPane = drawSidebar(font, initCh, Rect(x: 0, y: 0, w: sidebarW, h: sh), sidebar, ws.focused)
-      if clickedPane != -1:
-        ws.setFocus(clickedPane)
-        showWelcome = false
-    if showWelcome:
-      drawWelcome(font, initCh, sw, sh)
-    endDrawing()
+      waitTime(0.008)  # ~8 ms sleep when nothing to draw
 
   for id in ws.leaves():
     ws.setLeafCwd(id, states[id].pt.currentCwd())
