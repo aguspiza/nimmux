@@ -28,7 +28,9 @@ proc loadTermFont*(fontSize: int32): Font =
     ]
   for path in candidates:
     if fileExists(path):
-      return loadFont(path, fontSize, 512)
+      result = loadFont(path, fontSize, 512)
+      setTextureFilter(result.texture, TextureFilter.Bilinear)
+      return result
   getFontDefault()
 
 proc cellDims*(font: Font; fontSize: float32): (float32, float32) =
