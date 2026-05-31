@@ -9,11 +9,12 @@
 ## Ctrl+Z           zoom focused pane (toggle)
 
 import raylib
-import std/[tables, os, osproc, strutils, times]
+import std/[tables, os, osproc, streams, strutils, times]
 import workspace, term, pty, renderer, session
 
 const
-  SidebarWidth = 200.0'f32
+  SidebarWidth  = 200.0'f32
+  CacheInterval = 3.0  # seconds between background subprocess refreshes
 
 type PaneState = ref object
   trm:      Terminal
@@ -38,50 +39,81 @@ proc defaultShell(): string =
     let s = getEnv("SHELL")
     if s.len > 0: s else: "/bin/sh"
 
+# ── git branch (non-blocking per-cwd) ─────────────────────────────────────────
+
 var gitBranchCache = initTable[string, tuple[branch: string; t: float]]()
+var gitProcs       = initTable[string, Process]()
 
 proc getGitBranch(cwd: string): string =
   if cwd.len == 0: return ""
   let now = epochTime()
-  if cwd in gitBranchCache and now - gitBranchCache[cwd].t < 2.0:
-    return gitBranchCache[cwd].branch
-  try:
-    let (output, code) = execCmdEx("git -C " & quoteShell(cwd) & " rev-parse --abbrev-ref HEAD")
-    result = if code == 0: output.strip() else: ""
-    if result == "HEAD": result = ""  # detached HEAD — not useful to show
-  except:
-    result = ""
-  gitBranchCache[cwd] = (branch: result, t: now)
+  if cwd in gitProcs:
+    let p = gitProcs[cwd]
+    if p.peekExitCode() != -1:
+      var branch = p.outputStream.readAll().strip()
+      p.close()
+      gitProcs.del(cwd)
+      if branch == "HEAD": branch = ""
+      gitBranchCache[cwd] = (branch: branch, t: now)
+  if cwd in gitBranchCache:
+    result = gitBranchCache[cwd].branch
+    if now - gitBranchCache[cwd].t >= CacheInterval and cwd notin gitProcs:
+      try:
+        gitProcs[cwd] = startProcess("git",
+          args = ["-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"],
+          options = {poUsePath, poStdErrToStdOut})
+      except: discard
+  elif cwd notin gitProcs:
+    try:
+      gitProcs[cwd] = startProcess("git",
+        args = ["-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"],
+        options = {poUsePath, poStdErrToStdOut})
+    except: discard
+
+# ── port detection (non-blocking) ─────────────────────────────────────────────
 
 when defined(windows):
   var winNetstatOut  = ""
-  var winNetstatTime = epochTime()  # defer first run by 3s so frame 0 doesn't block
+  var winNetstatTime = epochTime()  # defer first run by CacheInterval
+  var winNetstatProc: Process
+
   var winParentOf    = initTable[int, int]()  # pid → parent pid
-  var winProcMapTime = epochTime()  # defer first run by 3s
+  var winProcMapTime = epochTime()  # defer first run by CacheInterval
+  var winProcMapProc: Process
 
-  proc refreshWinNetstat() =
-    let now = epochTime()
-    if now - winNetstatTime < 3.0: return
-    let (o, _) = execCmdEx("netstat.exe -ano 2>nul")
-    winNetstatOut  = o
-    winNetstatTime = now
+  proc pollWinNetstat() =
+    if winNetstatProc != nil and winNetstatProc.peekExitCode() != -1:
+      winNetstatOut  = winNetstatProc.outputStream.readAll()
+      winNetstatProc.close()
+      winNetstatProc = nil
+      winNetstatTime = epochTime()
+    if winNetstatProc == nil and epochTime() - winNetstatTime >= CacheInterval:
+      try:
+        winNetstatProc = startProcess("netstat.exe", args = ["-ano"],
+                                      options = {poUsePath, poStdErrToStdOut})
+      except: discard
 
-  proc refreshWinProcMap() =
-    let now = epochTime()
-    if now - winProcMapTime < 3.0: return
-    winParentOf.clear()
-    # wmic gives CSV: Node,ParentProcessId,ProcessId
-    let (csv, code) = execCmdEx("wmic process get ProcessId,ParentProcessId /format:csv 2>nul")
-    if code != 0: return
-    for line in csv.splitLines():
-      let s = line.strip()
-      if s.len == 0 or s.startsWith("Node"): continue
-      let parts = s.split(',')
-      if parts.len < 3: continue
-      let ppid = try: parseInt(parts[1].strip()) except: continue
-      let pid  = try: parseInt(parts[2].strip()) except: continue
-      winParentOf[pid] = ppid
-    winProcMapTime = now
+  proc pollWinProcMap() =
+    if winProcMapProc != nil and winProcMapProc.peekExitCode() != -1:
+      let csv = winProcMapProc.outputStream.readAll()
+      winProcMapProc.close()
+      winProcMapProc = nil
+      winParentOf.clear()
+      for line in csv.splitLines():
+        let s = line.strip()
+        if s.len == 0 or s.startsWith("Node"): continue
+        let parts = s.split(',')
+        if parts.len < 3: continue
+        let ppid = try: parseInt(parts[1].strip()) except: continue
+        let pid  = try: parseInt(parts[2].strip()) except: continue
+        winParentOf[pid] = ppid
+      winProcMapTime = epochTime()
+    if winProcMapProc == nil and epochTime() - winProcMapTime >= CacheInterval:
+      try:
+        winProcMapProc = startProcess("wmic",
+          args = ["process", "get", "ProcessId,ParentProcessId", "/format:csv"],
+          options = {poUsePath, poStdErrToStdOut})
+      except: discard
 
   proc isInFamily(pid, rootPid: int): bool =
     var cur = pid
@@ -93,7 +125,20 @@ when defined(windows):
 
 else:
   var ssCacheOutput = ""
-  var ssCacheTime   = epochTime()  # defer first ss run by 3s
+  var ssCacheTime   = epochTime()  # defer first run by CacheInterval
+  var ssProc: Process
+
+  proc pollSsCache() =
+    if ssProc != nil and ssProc.peekExitCode() != -1:
+      ssCacheOutput = ssProc.outputStream.readAll()
+      ssProc.close()
+      ssProc = nil
+      ssCacheTime = epochTime()
+    if ssProc == nil and epochTime() - ssCacheTime >= CacheInterval:
+      try:
+        ssProc = startProcess("ss", args = ["-Htlnp"],
+                              options = {poUsePath, poStdErrToStdOut})
+      except: discard
 
   proc sessionId(pid: int): int =
     let data = try: readFile("/proc/" & $pid & "/stat") except: return -1
@@ -107,8 +152,6 @@ proc getPanePorts(pt: Pty): seq[string] =
   when defined(windows):
     let shellPid = pt.shellPid()
     if shellPid == 0: return @[]
-    refreshWinProcMap()
-    refreshWinNetstat()
     for line in winNetstatOut.splitLines():
       if "LISTENING" notin line: continue
       let parts = line.splitWhitespace()
@@ -123,11 +166,6 @@ proc getPanePorts(pt: Pty): seq[string] =
   else:
     let sid = sessionId(pt.pid.int)
     if sid <= 0: return @[]
-    let now = epochTime()
-    if now - ssCacheTime > 3.0:
-      let (ssOut, _) = execCmdEx("ss -Htlnp 2>/dev/null")
-      ssCacheOutput = ssOut
-      ssCacheTime   = now
     for line in ssCacheOutput.splitLines():
       if "pid=" notin line: continue
       let pidStart = line.find("pid=")
@@ -300,6 +338,13 @@ proc main() =
       states.del(id)
       ws.close(id)
 
+    # poll background subprocesses (never blocks)
+    when defined(windows):
+      pollWinNetstat()
+      pollWinProcMap()
+    else:
+      pollSsCache()
+
     # update sidebar info
     let curW = getScreenWidth().float32
     let curH = getScreenHeight().float32
@@ -348,5 +393,21 @@ proc main() =
   for id in ws.leaves():
     termFree(states[id].trm)
     states[id].pt.close()
+
+  # clean up any running background processes
+  for _, p in gitProcs:
+    try: p.terminate() except: discard
+    p.close()
+  when defined(windows):
+    if winNetstatProc != nil:
+      try: winNetstatProc.terminate() except: discard
+      winNetstatProc.close()
+    if winProcMapProc != nil:
+      try: winProcMapProc.terminate() except: discard
+      winProcMapProc.close()
+  else:
+    if ssProc != nil:
+      try: ssProc.terminate() except: discard
+      ssProc.close()
 
 main()

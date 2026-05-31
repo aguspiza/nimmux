@@ -121,6 +121,7 @@ type
     branch*: string
     ports*: seq[string]
     notifCount*: int
+    source*: string  # "local" or "ssh://user@host"
 
   SidebarState* = object
     width*: float32
@@ -130,17 +131,18 @@ proc initSidebar*(width: float32): SidebarState =
   result.width = width
   result.panes = @[]
 
-proc updatePaneInfo*(sb: var SidebarState; id: int; cwd, branch: string; 
-                      ports: seq[string]; notifCount: int) =
+proc updatePaneInfo*(sb: var SidebarState; id: int; cwd, branch: string;
+                      ports: seq[string]; notifCount: int; source = "local") =
   for i in 0..<sb.panes.len:
     if sb.panes[i].id == id:
       sb.panes[i].cwd = cwd
       sb.panes[i].branch = branch
       sb.panes[i].ports = ports
       sb.panes[i].notifCount = notifCount
+      sb.panes[i].source = source
       return
-  sb.panes.add PaneInfo(id: id, cwd: cwd, branch: branch, 
-                         ports: ports, notifCount: notifCount)
+  sb.panes.add PaneInfo(id: id, cwd: cwd, branch: branch,
+                         ports: ports, notifCount: notifCount, source: source)
 
 proc drawSidebar*(font: Font; cellH: float32; r: Rect; sb: SidebarState; focusedId: int): int =
   ## Returns the pane ID under the mouse cursor, or -1 if none
@@ -189,10 +191,16 @@ proc drawSidebar*(font: Font; cellH: float32; r: Rect; sb: SidebarState; focused
       drawText(font, badge, Vector2(x: r.x + sidebarW - 22, y: y + 3), cellH * 0.75, 0,
                Color(r: 255, g: 255, b: 255, a: 255))
 
-    # Line 2: git branch (truncated to fit sidebar width)
+    # Line 2: git branch + remote source badge (suppressed for "local")
+    let line2Y = y + cellH + 6
+    if pane.source.len > 0 and pane.source != "local":
+      let srcLabel = pane.source
+      let srcW = measureText(font, srcLabel, branchSz, 0).x
+      drawText(font, srcLabel, Vector2(x: r.x + sidebarW - srcW - 6, y: line2Y),
+               branchSz, 0, Color(r: 100, g: 180, b: 255, a: 200))
     if pane.branch.len > 0:
       let branch = if pane.branch.len <= maxBranchChars: pane.branch
                    else: pane.branch[0 ..< maxBranchChars - 1] & "…"
-      drawText(font, branch, Vector2(x: r.x + 14, y: y + cellH + 6), branchSz, 0, SidebarDimText)
+      drawText(font, branch, Vector2(x: r.x + 14, y: line2Y), branchSz, 0, SidebarDimText)
 
     y += entryH + 2

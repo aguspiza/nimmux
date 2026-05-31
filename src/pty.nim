@@ -53,9 +53,9 @@ when defined(windows):
   const
     PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = SIZE_T(0x00020016)
     EXTENDED_STARTUPINFO_PRESENT        = DWORD(0x00080000)
-    STARTF_USESTDHANDLES = DWORD(0x00000100)
-    S_OK                 = HRESULT(0)
-    WAIT_TIMEOUT_VAL     = DWORD(0x00000102)
+    STARTF_USESTDHANDLES                = DWORD(0x00000100)
+    S_OK                                = HRESULT(0)
+    WAIT_TIMEOUT_VAL                    = DWORD(0x00000102)
 
   {.push importc, header: "<windows.h>".}
   proc CreatePseudoConsole(size: COORD; hInput, hOutput: HANDLE; dwFlags: DWORD;
@@ -88,6 +88,7 @@ when defined(windows):
                       lpProcessInformation: ptr PROCESS_INFORMATION): BOOL
   proc TerminateProcess(hProcess: HANDLE; uExitCode: uint32): BOOL
   proc WaitForSingleObject(hHandle: HANDLE; dwMilliseconds: DWORD): DWORD
+  proc GetLastError(): DWORD
   {.pop.}
 
   proc ReadProcessMemory(hProcess: HANDLE; lpBase: pointer; lpBuf: pointer;
@@ -127,8 +128,8 @@ when defined(windows):
 
     var si = STARTUPINFOEXW()
     si.StartupInfo.cb        = sizeof(STARTUPINFOEXW).DWORD
-    si.StartupInfo.dwFlags   = STARTF_USESTDHANDLES
-    si.StartupInfo.hStdInput  = cast[HANDLE](high(uint))
+    si.StartupInfo.dwFlags   = STARTF_USESTDHANDLES  # prevent child from inheriting parent console
+    si.StartupInfo.hStdInput  = cast[HANDLE](high(uint))  # INVALID_HANDLE_VALUE — ConPTY owns these
     si.StartupInfo.hStdOutput = cast[HANDLE](high(uint))
     si.StartupInfo.hStdError  = cast[HANDLE](high(uint))
     si.lpAttributeList = attrList
@@ -140,11 +141,17 @@ when defined(windows):
     var cmd = newWideCString(cmdLine)
     var wdir: pointer = nil
     var wdirBuf: WideCString
-    if cwd.len > 0:
+    if cwd.len > 0 and dirExists(cwd):  # skip stale session CWD if path no longer exists
       wdirBuf = newWideCString(cwd)
       wdir = cast[pointer](wdirBuf[0].addr)
-    doAssert CreateProcessW(nil, cast[pointer](cmd[0].addr), nil, nil, 0,
-      EXTENDED_STARTUPINFO_PRESENT, nil, wdir, addr si, addr result.pi) != 0
+    var ok = CreateProcessW(nil, cast[pointer](cmd[0].addr), nil, nil, 0,
+      EXTENDED_STARTUPINFO_PRESENT, nil, wdir, addr si, addr result.pi)
+    if ok == 0 and wdir != nil:
+      # stale/incompatible cwd — retry without it
+      ok = CreateProcessW(nil, cast[pointer](cmd[0].addr), nil, nil, 0,
+        EXTENDED_STARTUPINFO_PRESENT, nil, nil, addr si, addr result.pi)
+    if ok == 0:
+      raise newException(OSError, "CreateProcessW failed (error " & $GetLastError() & ")")
 
     DeleteProcThreadAttributeList(attrList)
     dealloc(attrList)
