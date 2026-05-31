@@ -18,6 +18,38 @@ Everything else (notifications, browser, SSH, hooks, IPC API, config) is post-MV
 
 ---
 
+## MVP 1.1 Scope
+
+| Phase | Feature | Blocks |
+|-------|---------|--------|
+| A | OSC sequence parser | C |
+| B | Workspace tabs + sidebar | — |
+| C | Notification state | D |
+| D | Notification panel overlay | — |
+| E | IPC socket server | F |
+| F | CLI (`nimmux notify`, `nimmux split`, …) | G |
+| G | Hooks integration (`nimmux hooks setup`) | — |
+| H | In-app browser | — |
+| I | SSH workspaces | — |
+| J | Claude Code Teams | — |
+
+**Parallel tracks — none of these rows block each other:**
+```
+A ──► C ──► D
+B
+E ──► F ──► G
+H
+I
+J
+```
+
+E (IPC socket) is the only gate: F (CLI) and G (hooks) cannot start until E is done.
+Everything else — A, B, C, D, H, I, J — is independent and can be worked in any order.
+
+**MVP 1.1 done when:** a Claude Code agent running inside a nimmux pane can send a notification that lights up the tab, a human can jump to it with a keybind, and the session survives across restarts with hooks auto-resuming the agent.
+
+---
+
 ## Phase 0 — PoC: Alacritty Integration + Splits ✓ DONE (2026-05-30)
 
 **Goal:** validate that libvterm + Raylib can be called from Nim and that multiple terminal instances can be rendered in vertical and horizontal split layouts.
@@ -70,7 +102,7 @@ test "unknown keys are ignored":
 
 ---
 
-## Phase 3 — OSC Sequence Parser `[post-MVP]`
+## Phase 3 — OSC Sequence Parser `[MVP 1.1 / A]`
 
 The notification system is entirely driven by OSC 9/99/777. Parsing these sequences is pure logic.
 
@@ -144,7 +176,7 @@ test "writes to stdin":
 
 ---
 
-## Phase 6 — Notification State Machine `[post-MVP]`
+## Phase 6 — Notification State Machine `[MVP 1.1 / C]`
 
 **Tests first:**
 ```nim
@@ -214,7 +246,7 @@ test "snapshot is valid JSON":
 
 ---
 
-## Phase 9 — CLI `[post-MVP]`
+## Phase 9 — CLI `[MVP 1.1 / F]`
 
 **Tests first (subprocess-level):**
 ```sh
@@ -229,7 +261,7 @@ Sub-commands: `notify`, `hooks setup [agent]`, `ssh`, `restore-session`, `surfac
 
 ---
 
-## Phase 10 — IPC Socket Server `[post-MVP]`
+## Phase 10 — IPC Socket Server `[MVP 1.1 / E]`
 
 **Tests first:**
 ```nim
@@ -255,36 +287,139 @@ test "split pane via socket":
 
 ---
 
-## Phase 12 — In-App Browser `[post-MVP]`
+## Phase 12 — In-App Browser `[MVP 1.1 / H]`
 
 > ADR required: choose browser embedding strategy (webview2 on Windows, WebKitGTK on Linux, or Electron/Tauri bridge).
 
 ---
 
-## Phase 13 — SSH Workspaces `[post-MVP]`
+## Phase 13 — SSH Workspaces `[MVP 1.1 / I]`
 
 `nimmux ssh user@remote` — remote PTY with browser proxy routing.
 **Tests:** integration tests against a local SSH server (e.g., OpenSSH in Docker).
 
 ---
 
+## Phase 14 — Workspace Tabs + Sidebar `[MVP 1.1 / B]`
+
+The vertical tab strip on the left showing all open workspaces. Each tab displays:
+git branch, working directory, listening ports, latest notification text, and an unread indicator ring.
+
+**Keybindings:** `Ctrl+T` new workspace, `Ctrl+Shift+W` close workspace, `Ctrl+1`…`9` jump to workspace N.
+
+**Tests first:**
+```nim
+# tests/test_tabs.nim
+test "new tab creates a fresh workspace":
+  var tm = initTabManager()
+  let id = tm.addTab()
+  check tm.tabs.len == 2
+
+test "close tab removes it and focuses adjacent":
+  var tm = initTabManager()
+  let id = tm.addTab()
+  tm.closeTab(id)
+  check tm.tabs.len == 1
+
+test "tab metadata reflects workspace state":
+  var tm = initTabManager()
+  tm.setMeta(tm.activeTab, cwd = "/home/user/project", branch = "main")
+  check tm.meta(tm.activeTab).branch == "main"
+```
+
+**Implement:** `src/tabs.nim` — tab list + per-tab `Workspace`; `renderer.nim` extended with sidebar strip.
+
+---
+
+## Phase 15 — Notification Panel `[MVP 1.1 / D]`
+
+Full-screen overlay listing every pending notification across all workspaces, newest first.
+`Ctrl+Shift+U` toggles the panel; selecting an entry jumps to that pane and marks it read.
+
+**Tests first:**
+```nim
+# tests/test_notif_panel.nim
+test "panel lists all unread notifications":
+  var ns = initNotifState()
+  ns.add(paneId = 1, body = "a")
+  ns.add(paneId = 2, body = "b")
+  check ns.allUnread().len == 2
+
+test "selecting entry marks it read":
+  var ns = initNotifState()
+  ns.add(paneId = 1, body = "x")
+  ns.markRead(1)
+  check ns.allUnread().len == 0
+```
+
+**Implement:** `renderer.nim` — `drawNotifPanel(…)` overlay; `nimmux.nim` — toggle state + keyboard nav.
+
+---
+
+## Phase 16 — Hooks Integration `[MVP 1.1 / G]`
+
+`nimmux hooks setup [agent]` installs a resume hook for the named agent (claude-code, codex, opencode).
+The hook calls `nimmux notify "agent is waiting"` so the pane gets a notification ring.
+
+**Agents supported:** `claude-code` (writes `~/.claude/hooks/`), `codex`, `opencode`.
+
+**Tests first:**
+```nim
+# tests/test_hooks.nim
+test "generates claude-code hook script":
+  let script = hookScript("claude-code")
+  check "nimmux notify" in script
+
+test "hook install writes file":
+  let dir = getTempDir() / "nimmux_hook_test"
+  installHook("claude-code", hooksDir = dir)
+  check fileExists(dir / "stop.sh")
+```
+
+**Implement:** `src/hooks.nim` — template per agent; `src/cli.nim` extended with `hooks setup` sub-command.
+
+---
+
+## Phase 17 — Claude Code Teams `[MVP 1.1 / J]`
+
+`nimmux claude-teams` spawns multiple Claude Code sessions as native splits within a workspace,
+each with sidebar metadata (task description, status, branch).
+
+**Tests first:**
+```nim
+# tests/test_teams.nim
+test "spawns N agent panes":
+  var ws = newWorkspace()
+  spawnTeam(ws, count = 3, cmd = "echo agent")
+  check ws.leaves().len == 3
+```
+
+**Implement:** `src/teams.nim` — splits workspace N ways, launches agent command in each pane,
+hooks into notification state for per-agent status display.
+
+---
+
 ## Dependency Order
 
-MVP path marked with `*`.
+MVP 1.0 path marked with `*`. MVP 1.1 path marked with `†`.
 
 ```
-Phase 0 * (PoC — Alacritty + splits)  ← architecture gate
-  └─ Phase 1 * (scaffold)
-       ├─ Phase 2   (config)
-       ├─ Phase 3   (OSC parser)
-       └─ Phase 4 * (FFI bridge — real)
-            └─ Phase 5 * (PTY)
-                 ├─ Phase 6   (notifications)
-                 └─ Phase 7 * (workspace model)
-                      ├─ Phase 8 * (session restore)  ← MVP done
-                      ├─ Phase 9   (CLI)
-                      └─ Phase 10  (IPC)
-                           └─ Phase 11 * (UI — keybindings Ctrl+D / Ctrl+Shift+D)  ← ADR gate
-                                ├─ Phase 12  (browser)  ← ADR gate
-                                └─ Phase 13  (SSH)
+Phase 0  * (PoC — Alacritty + splits)  ← architecture gate
+  └─ Phase 1  * (scaffold)
+       ├─ Phase 2    (config)                                   ✓ DONE
+       ├─ Phase 3  † (OSC parser / A)
+       └─ Phase 4  * (FFI bridge — real)
+            └─ Phase 5  * (PTY)
+                 ├─ Phase 6  † (notification state / C)
+                 │    └─ Phase 15 † (notification panel / D)
+                 └─ Phase 7  * (workspace model)
+                      ├─ Phase 8  * (session restore)           ← MVP 1.0 done ✓
+                      ├─ Phase 14 † (workspace tabs+sidebar / B)
+                      ├─ Phase 9  † (CLI / F)
+                      │    └─ Phase 16 † (hooks / G)
+                      └─ Phase 10 † (IPC / E)  ← gates F and G
+                           └─ Phase 11 * (UI)                   ✓ DONE
+                                ├─ Phase 12 † (browser / H)    ← ADR gate
+                                ├─ Phase 13 † (SSH / I)
+                                └─ Phase 17 † (Claude Code Teams / J)
 ```
