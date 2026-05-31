@@ -217,7 +217,7 @@ proc main() =
     if curW != prevW or curH != prevH:
       prevW = curW; prevH = curH
       let paneW = curW - sidebarW
-      for (id, rect) in ws.leafRects(Rect(x: 0, y: 0, w: paneW, h: curH)):
+      for (id, rect) in ws.leafRects(Rect(x: sidebarW, y: 0, w: paneW, h: curH)):
         let (cw, ch) = cellDims(font, states[id].fontSize)
         let ncols = max(1'i32, int32(rect.w / cw))
         let nrows = max(1'i32, int32(rect.h / ch))
@@ -232,11 +232,11 @@ proc main() =
     let paneW = sw - sidebarW
     if zoomed:
       drawPane(font, states[ws.focused].fontSize, states[ws.focused].trm,
-               Rect(x: 0, y: 0, w: paneW, h: sh), true)
+               Rect(x: sidebarW, y: 0, w: paneW, h: sh), true)
     else:
-      for (id, rect) in ws.leafRects(Rect(x: 0, y: 0, w: paneW, h: sh)):
+      for (id, rect) in ws.leafRects(Rect(x: sidebarW, y: 0, w: paneW, h: sh)):
         drawPane(font, states[id].fontSize, states[id].trm, rect, id == ws.focused)
-    drawSidebar(font, initCh, Rect(x: 0, y: 0, w: sw, h: sh), sidebar, ws.focused)
+    drawSidebar(font, initCh, Rect(x: 0, y: 0, w: sidebarW, h: sh), sidebar, ws.focused)
     if showWelcome:
       drawWelcome(font, initCh, sw, sh)
     endDrawing()

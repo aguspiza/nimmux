@@ -146,6 +146,9 @@ proc drawSidebar*(font: Font; cellH: float32; r: Rect; sb: SidebarState; focused
   drawRectangle(Rectangle(x: r.x, y: r.y, width: sidebarW, height: sh), Color(r: 24, g: 24, b: 32, a: 255))
   drawRectangleLines(Rectangle(x: r.x, y: r.y, width: sidebarW, height: sh), 1.0'f32, SidebarBorder)
   
+  # Separator line between sidebar and panes
+  drawLine(Vector2(x: r.x + sidebarW, y: r.y), Vector2(x: r.x + sidebarW, y: sh), SidebarBorder)
+  
   var y = 8.0'f32
   let entryH = cellH + 4
   
