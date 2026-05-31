@@ -78,14 +78,22 @@ All keybindings currently assume **US keyboard layout** (Raylib `KeyboardKey` is
 
 ## Test-Driven Development
 
-**All new logic must be written test-first.** Before implementing a feature or fix:
+**MANDATORY. No exceptions. Write the test first, then the code.**
+
+This is a hard rule, not a guideline. Do not touch implementation code until there is a failing test that proves the bug exists or the feature is absent.
+
+**The only workflow:**
 
 1. Write a failing test in `tests/test_<module>.nim`
-2. Run it to confirm it fails for the right reason
-3. Implement the minimum code to make it pass
-4. Run the full suite (`nimble test`) — **tests must pass before every commit and push**
+2. Run it — confirm it fails *for the right reason* (not a compile error, not a wrong assertion)
+3. Write the minimum code to make it pass — nothing more
+4. Run `nimble test` — all tests must pass before every commit
 
-Tests that cannot be automated (Raylib rendering, PTY I/O) are exempt — everything else is not.
+**No test = no change.** If a bug is reported, the first deliverable is a test that reproduces it. If the test already exists, point to it. If the fix breaks other tests, the fix is wrong.
+
+**Rationale:** Multiple regressions in this project (session restore, Linux timeout, Windows data flow) were introduced by untested changes. Every fix that lacked a test broke something else within the same session.
+
+Tests that are genuinely impossible to automate (Raylib rendering, raw PTY I/O across process boundaries) are exempt. Everything in `src/daemon.nim`, `src/ipc.nim`, `src/session.nim`, `src/osc.nim`, and `src/workspace.nim` must have tests.
 
 ## Development Environment
 

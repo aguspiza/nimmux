@@ -148,6 +148,7 @@ proc pollPtyOutput() {.async.} =
         var client: Socket
         var address = ""
         sess.dataServer.acceptAddr(client, address)
+        client.getFd().setBlocking(false)  # Linux: accept() does not inherit O_NONBLOCK
         sess.dataClients.add(client)
         if sess.pendingBuf.len > 0:
           rawSend(client, sess.pendingBuf)

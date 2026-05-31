@@ -248,8 +248,9 @@ proc main() =
     addPane(id, initCols, initRows, saved.cwd,
             savedDaemonId = if saved.daemonSessionId >= 0: saved.daemonSessionId else: -1)
 
-  var shouldQuit = false
-  var zoomed     = false
+  var shouldQuit    = false
+  var shellsExited  = false  # true only when last pane shell exited (not window close)
+  var zoomed        = false
   var prevZoomed = false
   var sidebarExpanded     = true
   var prevSidebarExpanded = true
@@ -385,7 +386,8 @@ proc main() =
         deadPanes.add(id)
     for id in deadPanes:
       if ws.leaves().len == 1:
-        shouldQuit = true
+        shouldQuit   = true
+        shellsExited = true
         break
       termFree(states[id].trm)
       states[id].pt.close()
@@ -460,7 +462,8 @@ proc main() =
       daemonSessionId: if states[id].pt.isDaemon: states[id].pt.sessionId else: -1
     )
   saveSession(SessionData(workspace: ws, ptyStates: ptyStates))
-  shutdownDaemon()
+  if shellsExited:
+    shutdownDaemon()
   for id in ws.leaves():
     termFree(states[id].trm)
 

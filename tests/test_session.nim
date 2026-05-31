@@ -76,6 +76,48 @@ suite "session":
     check loaded.ptyStates[0].cwd == "/home/user"
     check loaded.ptyStates[1].pid == 67890
 
+  test "daemonSessionId zero is preserved (not treated as absent)":
+    ## daemonSessionId=0 is a valid session ID; it must survive the roundtrip
+    ## as 0, not be coerced to -1. The sentinel for "no daemon session" is -1.
+    var ptyStates: Table[int, PtyState] = initTable[int, PtyState]()
+    ptyStates[0] = PtyState(pid: 111, masterFd: 3, cwd: "/tmp",
+                            daemonSessionId: 0)
+    let j = %*{"focused": 0, "root": {"kind": "leaf", "id": 0},
+               "ptyStates": ptyStatesToJson(ptyStates)}
+    let loaded = fromJson(j)
+    check loaded.ptyStates[0].daemonSessionId == 0
+
+  test "daemonSessionId negative one means no daemon session":
+    var ptyStates: Table[int, PtyState] = initTable[int, PtyState]()
+    ptyStates[0] = PtyState(pid: 222, masterFd: 4, cwd: "/tmp",
+                            daemonSessionId: -1)
+    let j = %*{"focused": 0, "root": {"kind": "leaf", "id": 0},
+               "ptyStates": ptyStatesToJson(ptyStates)}
+    let loaded = fromJson(j)
+    check loaded.ptyStates[0].daemonSessionId == -1
+
+  test "daemonSessionId absent in JSON defaults to -1":
+    ## Old session files may lack the field; treat that as no daemon session.
+    let j = %*{"focused": 0, "root": {"kind": "leaf", "id": 0},
+               "ptyStates": [{"id": 0, "pid": 333, "masterFd": 5, "cwd": ""}]}
+    let loaded = fromJson(j)
+    check loaded.ptyStates[0].daemonSessionId == -1
+
+  test "daemonSessionId survives file save/load":
+    var ptyStates: Table[int, PtyState] = initTable[int, PtyState]()
+    ptyStates[0] = PtyState(pid: 444, masterFd: 6, cwd: "/home",
+                            daemonSessionId: 0)
+    ptyStates[1] = PtyState(pid: 555, masterFd: 7, cwd: "/tmp",
+                            daemonSessionId: 3)
+    var ws = newWorkspace()
+    discard ws.split(0, Vertical)
+    let path = getTempDir() / "nimmux_test_daemon_session.json"
+    saveSession(SessionData(workspace: ws, ptyStates: ptyStates), path)
+    let loaded = loadSession(path)
+    check loaded.ptyStates[0].daemonSessionId == 0
+    check loaded.ptyStates[1].daemonSessionId == 3
+    removeFile(path)
+
   test "empty pty states handled":
     let json = %*{"focused": 0, "root": {"kind": "leaf", "id": 0}}
     let loaded = fromJson(json)
