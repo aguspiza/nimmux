@@ -3,6 +3,7 @@
 ## Ctrl+Shift+D     split horizontal
 ## Ctrl+Shift+]     next pane
 ## Ctrl+Shift+[     previous pane
+## Ctrl+W           close pane
 
 import raylib
 import std/[tables, os]
@@ -76,6 +77,19 @@ proc main() =
       addPane(newId, ncols, nrows)
       ws.setFocus(newId)
       showWelcome = false
+
+    # close focused pane: Ctrl+W
+    if ctrl and isKeyPressed(KeyboardKey.W):
+      let id = ws.focused
+      if ws.leaves().len == 1:
+        shouldQuit = true
+      else:
+        var ps = states[id]
+        ps.pt.close()
+        var t = ps.trm
+        termFree(t)
+        states.del(id)
+        ws.close(id)
 
     # cycle focus: Ctrl+Shift+] / Ctrl+Shift+[
     if ctrl and shift:

@@ -69,7 +69,7 @@ proc drawPane*(font: Font; cellW, cellH: float32;
 proc drawWelcome*(font: Font; cellH: float32; sw, sh: float32) =
   const
     panelW = 440'f32
-    panelH = 218'f32
+    panelH = 246'f32
     pad    = 28'f32
     rowH   = 28'f32
     hints  = [
@@ -77,6 +77,7 @@ proc drawWelcome*(font: Font; cellH: float32; sw, sh: float32) =
       ("Ctrl+Shift+D",  "split horizontal"),
       ("Ctrl+Shift+]",  "next pane"),
       ("Ctrl+Shift+[",  "previous pane"),
+      ("Ctrl+W",        "close pane"),
     ]
 
   let px = (sw - panelW) * 0.5'f32
