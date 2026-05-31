@@ -59,7 +59,7 @@ All keybindings currently assume **US keyboard layout** (Raylib `KeyboardKey` is
 1. Write a failing test in `tests/test_<module>.nim`
 2. Run it to confirm it fails for the right reason
 3. Implement the minimum code to make it pass
-4. Run the full suite (`nimble test`) before committing
+4. Run the full suite (`nimble test`) — **tests must pass before every commit and push**
 
 Tests that cannot be automated (Raylib rendering, PTY I/O) are exempt — everything else is not.
 
