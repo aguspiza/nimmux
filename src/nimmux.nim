@@ -9,7 +9,7 @@
 ## Ctrl+Z           zoom focused pane (toggle)
 
 import raylib
-import std/[tables, os]
+import std/[tables, os, osproc, strutils, times]
 import workspace, term, pty, renderer, session
 
 const
@@ -38,9 +38,59 @@ proc defaultShell(): string =
     let s = getEnv("SHELL")
     if s.len > 0: s else: "/bin/sh"
 
-proc getGitBranch(cwd: string): string = ""  ## TODO MVP 1.1: run git subprocess
+var gitBranchCache = initTable[string, tuple[branch: string; t: float]]()
 
-proc getPanePorts(id: int): seq[string] = @[]  ## TODO MVP 1.1: parse ss/netstat output
+proc getGitBranch(cwd: string): string =
+  if cwd.len == 0: return ""
+  let now = epochTime()
+  if cwd in gitBranchCache and now - gitBranchCache[cwd].t < 2.0:
+    return gitBranchCache[cwd].branch
+  try:
+    let (output, code) = execCmdEx("git -C " & quoteShell(cwd) & " rev-parse --abbrev-ref HEAD")
+    result = if code == 0: output.strip() else: ""
+    if result == "HEAD": result = ""  # detached HEAD — not useful to show
+  except:
+    result = ""
+  gitBranchCache[cwd] = (branch: result, t: now)
+
+when not defined(windows):
+  var ssCacheOutput = ""
+  var ssCacheTime   = 0.0
+
+  proc sessionId(pid: int): int =
+    let data = try: readFile("/proc/" & $pid & "/stat") except: return -1
+    let rp = data.rfind(')')
+    if rp < 0: return -1
+    let fields = data[rp + 2 .. ^1].splitWhitespace()
+    if fields.len < 4: return -1
+    try: parseInt(fields[3]) except: -1
+
+proc getPanePorts(pt: Pty): seq[string] =
+  when defined(windows):
+    @[]
+  else:
+    let sid = sessionId(pt.pid.int)
+    if sid <= 0: return @[]
+    let now = epochTime()
+    if now - ssCacheTime > 3.0:
+      let (ssOut, _) = execCmdEx("ss -Htlnp 2>/dev/null")
+      ssCacheOutput = ssOut
+      ssCacheTime   = now
+    for line in ssCacheOutput.splitLines():
+      if "pid=" notin line: continue
+      let pidStart = line.find("pid=")
+      let afterPid = line[pidStart + 4 .. ^1]
+      let endIdx = afterPid.find({',', ')'})
+      if endIdx < 0: continue
+      let procPid = try: parseInt(afterPid[0 ..< endIdx]) except: continue
+      if sessionId(procPid) != sid: continue
+      let parts = line.splitWhitespace()
+      if parts.len < 4: continue
+      let colon = parts[3].rfind(':')
+      if colon < 0: continue
+      let port = parts[3][colon + 1 .. ^1]
+      if port.len > 0 and port != "*" and port notin result:
+        result.add(port)
 
 proc main() =
   setTraceLogLevel(TraceLogLevel.Error)
@@ -204,7 +254,7 @@ proc main() =
     for id in ws.leaves():
       let cwd = states[id].pt.currentCwd()
       let branch = getGitBranch(cwd)
-      let ports = getPanePorts(id)
+      let ports = getPanePorts(states[id].pt)
       sidebar.updatePaneInfo(id, cwd, branch, ports, 0)
 
     # reflow on window resize
