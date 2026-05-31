@@ -48,18 +48,21 @@ proc main() =
     copyMem(data[0].addr, s, size.int)
     ps.pt.write(data)
 
-  proc addPane(id: int; cols, rows: int32) =
+  proc addPane(id: int; cols, rows: int32; cwd = "") =
     let ps = PaneState(
       trm: termNew(cols, rows),
-      pt:  ptySpawn(shell, @[], cols, rows),
+      pt:  ptySpawn(shell, @[], cols, rows, cwd),
       buf: @[])
     vterm_output_set_callback(ps.trm.vt, onOutput, cast[pointer](ps))
     states[id] = ps
 
   for id in ws.leaves():
-    addPane(id, initCols, initRows)
+    addPane(id, initCols, initRows, ws.leafCwd(id))
 
-  while not windowShouldClose():
+  var shouldQuit = false
+  var prevW = getScreenWidth()
+  var prevH = getScreenHeight()
+  while not windowShouldClose() and not shouldQuit:
     let ctrl  = isKeyDown(KeyboardKey.LeftControl)  or isKeyDown(KeyboardKey.RightControl)
     let shift = isKeyDown(KeyboardKey.LeftShift)    or isKeyDown(KeyboardKey.RightShift)
 
@@ -116,6 +119,33 @@ proc main() =
         ps.buf.setLen(0)
         showWelcome = false
 
+    # close panes whose shell has exited
+    var deadPanes: seq[int]
+    for id in ws.leaves():
+      if not states[id].pt.isAlive():
+        deadPanes.add(id)
+    for id in deadPanes:
+      if ws.leaves().len == 1:
+        shouldQuit = true
+        break
+      var ps = states[id]
+      ps.pt.close()
+      var t = ps.trm
+      termFree(t)
+      states.del(id)
+      ws.close(id)
+
+    # reflow on window resize
+    let curW = getScreenWidth()
+    let curH = getScreenHeight()
+    if curW != prevW or curH != prevH:
+      prevW = curW; prevH = curH
+      for (id, rect) in ws.leafRects(Rect(x: 0, y: 0, w: curW.float32, h: curH.float32)):
+        let ncols = max(1'i32, int32(rect.w / cw))
+        let nrows = max(1'i32, int32(rect.h / ch))
+        states[id].trm.termResize(ncols, nrows)
+        states[id].pt.resize(ncols, nrows)
+
     # render
     beginDrawing()
     clearBackground(Color(r: 20, g: 20, b: 20, a: 255))
@@ -127,6 +157,8 @@ proc main() =
       drawWelcome(font, ch, sw, sh)
     endDrawing()
 
+  for id in ws.leaves():
+    ws.setLeafCwd(id, states[id].pt.currentCwd())
   saveSession(ws)
   for _, ps in states:
     var p = ps.pt

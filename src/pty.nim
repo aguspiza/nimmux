@@ -55,6 +55,7 @@ when defined(windows):
     EXTENDED_STARTUPINFO_PRESENT        = DWORD(0x00080000)
     STARTF_USESTDHANDLES = DWORD(0x00000100)
     S_OK                 = HRESULT(0)
+    WAIT_TIMEOUT_VAL     = DWORD(0x00000102)
 
   {.push importc, header: "<windows.h>".}
   proc CreatePseudoConsole(size: COORD; hInput, hOutput: HANDLE; dwFlags: DWORD;
@@ -86,6 +87,7 @@ when defined(windows):
                       lpStartupInfo: pointer;
                       lpProcessInformation: ptr PROCESS_INFORMATION): BOOL
   proc TerminateProcess(hProcess: HANDLE; uExitCode: uint32): BOOL
+  proc WaitForSingleObject(hHandle: HANDLE; dwMilliseconds: DWORD): DWORD
   {.pop.}
 
   # ── public API (Windows) ──────────────────────────────────────────────────────
@@ -97,7 +99,7 @@ when defined(windows):
     pi*:     PROCESS_INFORMATION
 
   proc ptySpawn*(shell: string; args: seq[string];
-                 cols = 80'i32; rows = 24'i32): Pty =
+                 cols = 80'i32; rows = 24'i32; cwd = ""): Pty =
     var hPtyIn, hPtyOut, hAppWrite, hAppRead: HANDLE
     doAssert CreatePipe(addr hPtyIn,  addr hAppWrite, nil, 0) != 0
     doAssert CreatePipe(addr hAppRead, addr hPtyOut,  nil, 0) != 0
@@ -128,8 +130,13 @@ when defined(windows):
       cmdLine.add(' ')
       cmdLine.add(a)
     var cmd = newWideCString(cmdLine)
+    var wdir: pointer = nil
+    var wdirBuf: WideCString
+    if cwd.len > 0:
+      wdirBuf = newWideCString(cwd)
+      wdir = cast[pointer](wdirBuf[0].addr)
     doAssert CreateProcessW(nil, cast[pointer](cmd[0].addr), nil, nil, 0,
-      EXTENDED_STARTUPINFO_PRESENT, nil, nil, addr si, addr result.pi) != 0
+      EXTENDED_STARTUPINFO_PRESENT, nil, wdir, addr si, addr result.pi) != 0
 
     DeleteProcThreadAttributeList(attrList)
     dealloc(attrList)
@@ -179,6 +186,12 @@ when defined(windows):
       discard CloseHandle(pty.pi.hProcess); pty.pi.hProcess = nil
       discard CloseHandle(pty.pi.hThread);  pty.pi.hThread  = nil
 
+  proc isAlive*(pty: Pty): bool =
+    if pty.pi.hProcess == nil: return false
+    WaitForSingleObject(pty.pi.hProcess, 0) == WAIT_TIMEOUT_VAL
+
+  proc currentCwd*(pty: Pty): string = ""
+
 else:  # ── POSIX ────────────────────────────────────────────────────────────────
 
   import std/posix
@@ -203,7 +216,7 @@ else:  # ── POSIX ───────────────────�
     pid*:    Pid
 
   proc ptySpawn*(shell: string; args: seq[string];
-                 cols = 80'i32; rows = 24'i32): Pty =
+                 cols = 80'i32; rows = 24'i32; cwd = ""): Pty =
     var master, slave: cint
     var ws = Winsize(ws_col: cols.uint16, ws_row: rows.uint16)
     if openpty(addr master, addr slave, nil, nil, addr ws) != 0:
@@ -219,6 +232,8 @@ else:  # ── POSIX ───────────────────�
       discard dup2(slave, STDOUT_FILENO)
       discard dup2(slave, STDERR_FILENO)
       discard posix.close(slave)
+      if cwd.len > 0:
+        discard posix.chdir(cstring(cwd))
       putEnv("TERM", "xterm-256color")
       putEnv("COLORTERM", "truecolor")
       var allArgs = @[shell] & args
@@ -271,3 +286,12 @@ else:  # ── POSIX ───────────────────�
     if pty.pid > 0:
       discard kill(pty.pid, SIGTERM)
       pty.pid = 0
+
+  proc isAlive*(pty: Pty): bool =
+    if pty.pid <= 0: return false
+    var status: cint
+    waitpid(pty.pid, status, WNOHANG) == 0
+
+  proc currentCwd*(pty: Pty): string =
+    try: expandSymlink("/proc/" & $pty.pid.int & "/cwd")
+    except: ""

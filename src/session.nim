@@ -6,7 +6,7 @@ import workspace
 proc paneToJson(p: Pane): JsonNode =
   case p.kind
   of Leaf:
-    %*{"kind": "leaf", "id": p.id}
+    %*{"kind": "leaf", "id": p.id, "cwd": p.cwd}
   of Split:
     %*{"kind": "split", "dir": $p.dir, "ratio": p.ratio,
        "first": paneToJson(p.first), "second": paneToJson(p.second)}
@@ -14,7 +14,7 @@ proc paneToJson(p: Pane): JsonNode =
 proc paneFromJson(n: JsonNode): Pane =
   case n["kind"].getStr()
   of "leaf":
-    Pane(kind: Leaf, id: n["id"].getInt())
+    Pane(kind: Leaf, id: n["id"].getInt(), cwd: n{"cwd"}.getStr(""))
   of "split":
     let dir = if n["dir"].getStr() == "Horizontal": Horizontal else: Vertical
     Pane(kind: Split, dir: dir, ratio: n["ratio"].getFloat().float32,

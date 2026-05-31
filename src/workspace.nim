@@ -12,7 +12,8 @@ type
   Pane* = ref object
     case kind*: PaneKind
     of Leaf:
-      id*: int
+      id*:  int
+      cwd*: string
     of Split:
       dir*:    SplitDir
       ratio*:  float32   ## fraction [0..1] allocated to `first`
@@ -80,6 +81,21 @@ proc close*(ws: var Workspace; id: int) =
   discard go(ws.root)
   if ws.focused == id:
     ws.focused = ws.leaves()[0]
+
+proc setLeafCwd*(ws: var Workspace; id: int; cwd: string) =
+  proc go(p: Pane) =
+    if p.kind == Leaf and p.id == id: p.cwd = cwd
+    elif p.kind == Split: go(p.first); go(p.second)
+  go(ws.root)
+
+proc leafCwd*(ws: Workspace; id: int): string =
+  proc go(p: Pane): string =
+    if p.kind == Leaf and p.id == id: return p.cwd
+    elif p.kind == Split:
+      let r = go(p.first)
+      if r.len > 0: return r
+      return go(p.second)
+  go(ws.root)
 
 type Rect* = object
   x*, y*, w*, h*: float32
