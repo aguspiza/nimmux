@@ -6,7 +6,7 @@ srcDir      = "src"
 bin         = @["nimmux"]
 
 requires "nim >= 2.2.0"
-requires "https://github.com/aguspiza/naylib#fix/destroy-guard-after-close-window"
+requires "naylib >= 5.0.0"
 
 task test, "Run tests with testament":
   exec "testament pattern \"tests/test_*.nim\""
