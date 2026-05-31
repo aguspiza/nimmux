@@ -12,6 +12,9 @@ import raylib
 import std/[tables, os]
 import workspace, term, pty, renderer, session
 
+const
+  SidebarWidth = 200.0'f32
+
 type PaneState = ref object
   trm:      Terminal
   pt:       Pty
@@ -35,6 +38,10 @@ proc defaultShell(): string =
     let s = getEnv("SHELL")
     if s.len > 0: s else: "/bin/sh"
 
+proc getGitBranch(cwd: string): string = ""  ## TODO MVP 1.1: run git subprocess
+
+proc getPanePorts(id: int): seq[string] = @[]  ## TODO MVP 1.1: parse ss/netstat output
+
 proc main() =
   setTraceLogLevel(TraceLogLevel.Error)
   setConfigFlags(flags(ConfigFlags.VsyncHint, ConfigFlags.WindowResizable))
@@ -51,6 +58,7 @@ proc main() =
   var ws          = loadSession()
   var states      = initTable[int, PaneState]()
   var showWelcome = true
+  var sidebar     = initSidebar(SidebarWidth)
 
   proc onOutput(s: ConstCStr; size: uint64; user: pointer) {.cdecl.} =
     if size == 0: return
@@ -85,8 +93,9 @@ proc main() =
 
   var shouldQuit = false
   var zoomed     = false
-  var prevW = getScreenWidth()
-  var prevH = getScreenHeight()
+  var sidebarExpanded = true
+  var prevW = 0.0'f32
+  var prevH = 0.0'f32
   while not windowShouldClose() and not shouldQuit:
     let ctrl  = isKeyDown(KeyboardKey.LeftControl)  or isKeyDown(KeyboardKey.RightControl)
     let shift = isKeyDown(KeyboardKey.LeftShift)    or isKeyDown(KeyboardKey.RightShift)
@@ -117,6 +126,10 @@ proc main() =
     # zoom focused pane: Ctrl+Z toggles full-screen for the active pane
     if ctrl and isKeyPressed(KeyboardKey.Z):
       zoomed = not zoomed
+
+    # toggle sidebar: Ctrl+Shift+S
+    if ctrl and shift and isKeyPressed(KeyboardKey.S):
+      sidebarExpanded = not sidebarExpanded
 
     # font size: Ctrl+= increase  Ctrl+- decrease
     if ctrl and isKeyPressed(KeyboardKey.Equal):
@@ -184,12 +197,21 @@ proc main() =
       states.del(id)
       ws.close(id)
 
+    # update sidebar info
+    let curW = getScreenWidth().float32
+    let curH = getScreenHeight().float32
+    let sidebarW = if sidebarExpanded: SidebarWidth else: 0.0'f32
+    for id in ws.leaves():
+      let cwd = states[id].pt.currentCwd()
+      let branch = getGitBranch(cwd)
+      let ports = getPanePorts(id)
+      sidebar.updatePaneInfo(id, cwd, branch, ports, 0)
+
     # reflow on window resize
-    let curW = getScreenWidth()
-    let curH = getScreenHeight()
     if curW != prevW or curH != prevH:
       prevW = curW; prevH = curH
-      for (id, rect) in ws.leafRects(Rect(x: 0, y: 0, w: curW.float32, h: curH.float32)):
+      let paneW = curW - sidebarW
+      for (id, rect) in ws.leafRects(Rect(x: sidebarW, y: 0, w: paneW, h: curH)):
         let (cw, ch) = cellDims(font, states[id].fontSize)
         let ncols = max(1'i32, int32(rect.w / cw))
         let nrows = max(1'i32, int32(rect.h / ch))
@@ -201,12 +223,18 @@ proc main() =
     clearBackground(Color(r: 20, g: 20, b: 20, a: 255))
     let sw = getScreenWidth().float32
     let sh = getScreenHeight().float32
+    let paneW = sw - sidebarW
     if zoomed:
       drawPane(font, states[ws.focused].fontSize, states[ws.focused].trm,
-               Rect(x: 0, y: 0, w: sw, h: sh), true)
+               Rect(x: sidebarW, y: 0, w: paneW, h: sh), true)
     else:
-      for (id, rect) in ws.leafRects(Rect(x: 0, y: 0, w: sw, h: sh)):
+      for (id, rect) in ws.leafRects(Rect(x: sidebarW, y: 0, w: paneW, h: sh)):
         drawPane(font, states[id].fontSize, states[id].trm, rect, id == ws.focused)
+    if sidebarExpanded:
+      let clickedPane = drawSidebar(font, initCh, Rect(x: 0, y: 0, w: sidebarW, h: sh), sidebar, ws.focused)
+      if clickedPane != -1:
+        ws.setFocus(clickedPane)
+        showWelcome = false
     if showWelcome:
       drawWelcome(font, initCh, sw, sh)
     endDrawing()

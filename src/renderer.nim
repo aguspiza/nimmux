@@ -12,6 +12,10 @@ const
   BorderColor      = Color(r: 60,  g:  60, b:  60, a: 255)
   WelcomePanelBG   = Color(r: 12,  g:  16, b:  24, a: 245)
   WelcomeDimFG     = Color(r: 100, g: 100, b: 110, a: 255)
+  SidebarBorder    = Color(r: 50,  g:  50, b:  60, a: 255)
+  SidebarText      = Color(r: 180, g: 180, b: 190, a: 255)
+  SidebarDimText   = Color(r: 100, g: 100, b: 120, a: 255)
+  NotifBadgeColor  = Color(r: 255, g:  80, b:  80, a: 255)
 
 proc toRColor(rgb: array[3, uint8]): Color =
   Color(r: rgb[0], g: rgb[1], b: rgb[2], a: 255)
@@ -107,3 +111,82 @@ proc drawWelcome*(font: Font; cellH: float32; sw, sh: float32) =
     let y = hintY0 + float32(i) * rowH
     drawText(font, key,  Vector2(x: px + pad,       y: y), cellH, 0, Color(r: 210, g: 210, b: 215, a: 255))
     drawText(font, desc, Vector2(x: px + pad + 175, y: y), cellH, 0, WelcomeDimFG)
+
+# ── Sidebar Types ───────────────────────────────────────────────────────────────
+
+type
+  PaneInfo* = object
+    id*: int
+    cwd*: string
+    branch*: string
+    ports*: seq[string]
+    notifCount*: int
+
+  SidebarState* = object
+    width*: float32
+    panes*: seq[PaneInfo]
+
+proc initSidebar*(width: float32): SidebarState =
+  result.width = width
+  result.panes = @[]
+
+proc updatePaneInfo*(sb: var SidebarState; id: int; cwd, branch: string; 
+                      ports: seq[string]; notifCount: int) =
+  for i in 0..<sb.panes.len:
+    if sb.panes[i].id == id:
+      sb.panes[i].cwd = cwd
+      sb.panes[i].branch = branch
+      sb.panes[i].ports = ports
+      sb.panes[i].notifCount = notifCount
+      return
+  sb.panes.add PaneInfo(id: id, cwd: cwd, branch: branch, 
+                         ports: ports, notifCount: notifCount)
+
+proc drawSidebar*(font: Font; cellH: float32; r: Rect; sb: SidebarState; focusedId: int): int =
+  ## Returns the pane ID under the mouse cursor, or -1 if none
+  result = -1
+  let sh = r.y + r.h
+  let sidebarW = sb.width
+  
+  # Background (left side)
+  drawRectangle(Rectangle(x: r.x, y: r.y, width: sidebarW, height: sh), Color(r: 24, g: 24, b: 32, a: 255))
+  drawRectangleLines(Rectangle(x: r.x, y: r.y, width: sidebarW, height: sh), 1.0'f32, SidebarBorder)
+  
+  # Separator line between sidebar and panes
+  drawLine(Vector2(x: r.x + sidebarW, y: r.y), Vector2(x: r.x + sidebarW, y: sh), SidebarBorder)
+  
+  var y = 8.0'f32
+  let entryH = cellH + 4
+  
+  # Check for mouse click on panes
+  let mousePos = getMousePosition()
+  
+  for pane in sb.panes:
+    let isFocused = pane.id == focusedId
+    let bgColor = if isFocused: Color(r: 40, g: 50, b: 70, a: 255) else: Color(r: 0, g: 0, b: 0, a: 120)
+    let entryRect = Rectangle(x: r.x, y: y, width: sidebarW, height: entryH)
+    drawRectangle(entryRect, bgColor)
+    
+    # Check if mouse is over this entry
+    if sidebarW > 0 and checkCollisionPointRec(mousePos, entryRect) and isMouseButtonPressed(MouseButton.Left):
+      result = pane.id
+    
+    # Pane ID
+    let idStr = $pane.id & " "
+    drawText(font, idStr, Vector2(x: r.x + 8, y: y + 2), cellH, 0, SidebarDimText)
+    
+    # CWD (basename only)
+    let cwdName = if pane.cwd.len > 0: extractFilename(pane.cwd) else: "~"
+    drawText(font, cwdName, Vector2(x: r.x + 50, y: y + 2), cellH, 0, SidebarText)
+    
+    # Git branch
+    if pane.branch.len > 0:
+      drawText(font, " (" & pane.branch & ")", Vector2(x: r.x + 160, y: y + 2), cellH, 0, SidebarDimText)
+    
+    # Notification badge
+    if pane.notifCount > 0:
+      let badge = $pane.notifCount
+      drawCircle(Vector2(x: r.x + sidebarW - 16, y: y + entryH/2), 10.0'f32, NotifBadgeColor)
+      drawText(font, badge, Vector2(x: r.x + sidebarW - 28, y: y + 2), cellH * 0.75, 0, Color(r: 255, g: 255, b: 255, a: 255))
+    
+    y += entryH + 2
