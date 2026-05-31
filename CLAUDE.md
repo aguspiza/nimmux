@@ -6,36 +6,46 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 nimmux is a port of [cmux](https://github.com/manaflow-ai/cmux) from Swift/AppKit (macOS) to Nim for Linux and Windows (Posix). The original cmux is a Ghostty-based terminal multiplexer with vertical tabs, notification rings, and an in-app browser designed for running AI coding agents in parallel.
 
-The Nim port targets Posix platforms (Linux + Windows via POSIX layer), replacing:
+The Nim port targets Linux and Windows, replacing:
 - Swift/AppKit → Nim
-- libghostty (macOS GPU-accelerated terminal) → cross-platform terminal backend (TBD)
-- macOS native UI → cross-platform UI (TBD)
+- libghostty → libvterm 0.3.3 (bundled C source, `{.compile.}`) for VTE parsing
+- macOS native UI → Raylib via naylib for GPU-accelerated cross-platform rendering
 
-## Core Features to Port
+## Feature Status
 
-1. **Workspaces/tabs** — vertical sidebar showing per-workspace metadata: git branch, linked PR status, working directory, listening ports, latest notification text
-2. **Split panes** — horizontal and vertical splits within a workspace
-3. **Notification system** — picks up OSC 9/99/777 terminal sequences; pane gets a visual ring + tab lights up when agent is waiting; `nimmux notify` CLI command; `Cmd+Shift+U` equivalent to jump to latest unread
-4. **Notification panel** — aggregated view of all pending notifications
-5. **In-app browser** — split browser pane with scriptable API (accessibility tree, click, fill, JS eval); ported from [agent-browser](https://github.com/vercel-labs/agent-browser)
-6. **SSH workspaces** — `nimmux ssh user@remote` creates a workspace for a remote machine; browser panes route through remote network; drag-to-upload via scp
-7. **Claude Code Teams** — `nimmux claude-teams` spawns teammate sessions as native splits with sidebar metadata
-8. **Session restore** — saves/restores window layout, working dirs, scrollback, browser URL on quit/relaunch
-9. **Hooks integration** — `nimmux hooks setup [agent]` installs resume hooks for Claude Code, Codex, OpenCode, etc.
-10. **Scriptable CLI + socket API** — create workspaces/tabs, split panes, send keystrokes, open browser URLs
-11. **Config** — reads `~/.config/nimmux/nimmux.json` (analogous to `~/.config/cmux/cmux.json`)
+✅ done · 🔲 MVP 1.1 · ⬜ later
+
+| | Feature |
+|--|---------|
+| ✅ | Split panes — `Ctrl+D` vertical, `Ctrl+Shift+D` horizontal, `Ctrl+W` close |
+| ✅ | Pane focus — `Ctrl+Shift+]` / `Ctrl+Shift+[` |
+| ✅ | Session restore — layout + per-pane CWD |
+| ✅ | Shell exit closes pane; last pane exits app |
+| ✅ | Window resize reflows all panes |
+| ✅ | Config — `nimmux.json`, unknown keys ignored |
+| 🔲 | OSC 9/99/777 parser |
+| 🔲 | Workspace tabs + sidebar (git branch, CWD, ports, notification badge) |
+| 🔲 | Notification state + panel; `Ctrl+Shift+U` jump to latest unread |
+| 🔲 | IPC socket (gates CLI and hooks) |
+| 🔲 | CLI — `nimmux notify`, `nimmux split`, `nimmux hooks setup [agent]` |
+| 🔲 | Hooks — resume hooks for Claude Code, Codex, OpenCode |
+| ⬜ | In-app browser (scriptable: click, fill, JS eval) |
+| ⬜ | SSH workspaces — `nimmux ssh user@remote` |
+| ⬜ | Claude Code Teams — `nimmux claude-teams` |
 
 ## Architecture Decision Records
 
 Decisions are recorded in [`docs/adr/`](docs/adr/) using [MADR](https://adr.github.io/madr/) format. Name new files `NNNN-short-title.md`.
 
-## Key Architectural Differences from Original
+## Architecture
 
-- **Terminal backend — Alacritty** — use the `alacritty_terminal` Rust crate as the VTE parser and terminal state engine. Build it as a C-compatible shared library (`cdylib`) and call it from Nim via FFI. This gives GPU-accelerated rendering (wgpu) and full cross-platform support without reimplementing VTE.
-- **No AppKit/SwiftUI** — UI layer must be chosen for cross-platform: options include a TUI (e.g., illwill/nimcurses), a GUI toolkit (e.g., nimx, webview), or embedding a browser-based UI. The tab/sidebar/notification chrome is built in Nim on top of the Alacritty terminal surfaces.
-- **OSC sequences** — the notification system is protocol-based (OSC 9/99/777), so it's terminal-agnostic and can be preserved exactly. `alacritty_terminal` already parses these.
-- **Socket API** — original uses a Unix domain socket; this works on Linux and Windows (via `\\.\pipe\` or WSL socket).
-- **Session state** — stored under `~/.local/share/nimmux/` on Linux (XDG), `%APPDATA%\nimmux\` on Windows; agent hooks write to `~/.nimmuxterm/`.
+- **Terminal emulation** — libvterm 0.3.3, compiled from bundled source in `vendor/libvterm/` via `{.compile.}` pragmas. No system dependency. Bindings live in `src/term.nim`.
+- **PTY** — `src/pty.nim`: `openpty`/`fork`/`execvp` on Linux; `CreatePseudoConsole` (ConPTY) on Windows.
+- **Rendering** — Raylib via naylib (`naylib >= 5.0.0`). `src/renderer.nim` draws terminal cells and UI chrome. `src/nimmux.nim` is the main loop.
+- **OSC sequences** — notification system uses OSC 9/99/777, parsed separately from libvterm output (libvterm strips them). Parser lives in `src/osc.nim` (MVP 1.1).
+- **IPC** — Unix domain socket on Linux, named pipe on Windows. `src/ipc.nim` (MVP 1.1).
+- **Session state** — `~/.local/share/nimmux/session.json` on Linux, `%APPDATA%\nimmux\session.json` on Windows.
+- **Config** — `~/.config/nimmux/nimmux.json` on Linux, `%APPDATA%\nimmux\nimmux.json` on Windows. Unknown keys are silently ignored.
 
 ## Development Environment
 
@@ -45,23 +55,16 @@ Decisions are recorded in [`docs/adr/`](docs/adr/) using [MADR](https://adr.gith
 
 ## Build & Dev Commands
 
-Run from the project root (`C:/Users/Gus/coding/nimmux/`):
-
 ```sh
-nimble test           # run all tests via testament
-nimble build          # build nimmux binary
-nimble run            # build and run
-nim c -r tests/test_scaffold.nim   # compile and run a single test file
+nimble test                      # run all tests via testament
+nimble build                     # build nimmux binary
+nimble run                       # build and run
+nim c -r tests/test_workspace.nim  # compile and run a single test file
 ```
 
-**First-time setup** (generates `nimble.paths`):
+**First-time setup** (generates `nimble.paths`, machine-local — not committed):
 ```sh
 nimble setup
-```
-
-**PoC** lives in `poc/` — built separately with its own nimble file:
-```sh
-cd poc && nimble build
 ```
 
 **Linux testing** (from Windows): prefix commands with `wsl` or use the Bash tool inside WSL.
