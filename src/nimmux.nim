@@ -55,9 +55,9 @@ proc getGitBranch(cwd: string): string =
 
 when defined(windows):
   var winNetstatOut  = ""
-  var winNetstatTime = 0.0
+  var winNetstatTime = epochTime()  # defer first run by 3s so frame 0 doesn't block
   var winParentOf    = initTable[int, int]()  # pid → parent pid
-  var winProcMapTime = 0.0
+  var winProcMapTime = epochTime()  # defer first run by 3s
 
   proc refreshWinNetstat() =
     let now = epochTime()
@@ -93,7 +93,7 @@ when defined(windows):
 
 else:
   var ssCacheOutput = ""
-  var ssCacheTime   = 0.0
+  var ssCacheTime   = epochTime()  # defer first ss run by 3s
 
   proc sessionId(pid: int): int =
     let data = try: readFile("/proc/" & $pid & "/stat") except: return -1
