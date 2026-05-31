@@ -3,7 +3,7 @@
 ## Control channel: TCP 127.0.0.1:31337 (newline-delimited JSON)
 ## Data channels:   TCP 127.0.0.1:(31338 + sessionId), one per session
 
-import std/[json, net, os, osproc, tables, strutils]
+import std/[json, net, nativesockets, os, osproc, tables, strutils]
 import asyncnet, asyncdispatch
 import pty
 
@@ -18,8 +18,9 @@ type
   DaemonSession = ref object
     id:          int
     pt:          Pty
-    dataServer:  AsyncSocket
-    dataClients: seq[AsyncSocket]
+    dataServer:  Socket         ## non-blocking listen socket
+    dataClients: seq[Socket]    ## non-blocking accepted sockets
+    pendingBuf:  string         ## PTY output buffered before first client connects
 
 # ── global daemon state ───────────────────────────────────────────────────────
 
@@ -32,6 +33,11 @@ proc defaultShell(): string =
   else:
     let s = getEnv("SHELL"); if s.len > 0: s else: "/bin/sh"
 
+proc rawSend(c: Socket; s: string) =
+  ## Send via raw syscall — bypasses Nim's selectRead quirks on Windows.
+  if s.len > 0:
+    discard nativesockets.send(c.getFd(), cast[cstring](addr s[0]), s.len.cint, 0)
+
 # ── command handlers ──────────────────────────────────────────────────────────
 
 proc cmdSpawn(j: JsonNode): JsonNode =
@@ -41,10 +47,11 @@ proc cmdSpawn(j: JsonNode): JsonNode =
   let rows  = j{"rows"}.getInt(24).int32
   let id    = nextId; inc nextId
   let pt    = ptySpawn(shell, @[], cols, rows, cwd)
-  var srv   = newAsyncSocket()
+  var srv   = newSocket()
   srv.setSockOpt(OptReuseAddr, true)
   srv.bindAddr(Port(DataPortBase + id), DaemonHost)
   srv.listen(5)
+  srv.getFd().setBlocking(false)
   sessions[id] = DaemonSession(id: id, pt: pt, dataServer: srv, dataClients: @[])
   %*{"ok": true, "sessionId": id, "pid": pt.pid, "dataPort": DataPortBase + id}
 
@@ -91,13 +98,14 @@ proc cmdStatus(j: JsonNode): JsonNode =
 
 proc dispatch(cmd: string; j: JsonNode): JsonNode =
   case cmd
-  of "spawn":  cmdSpawn(j)
-  of "resize": cmdResize(j)
-  of "close":  cmdClose(j)
-  of "cwd":    cmdCwd(j)
-  of "alive":  cmdAlive(j)
-  of "list":   cmdList(j)
-  of "status": cmdStatus(j)
+  of "spawn":    cmdSpawn(j)
+  of "resize":   cmdResize(j)
+  of "close":    cmdClose(j)
+  of "cwd":      cmdCwd(j)
+  of "alive":    cmdAlive(j)
+  of "list":     cmdList(j)
+  of "status":   cmdStatus(j)
+  of "shutdown": %*{"ok": true}
   else: %*{"ok": false, "error": "unknown: " & cmd}
 
 # ── async handlers ────────────────────────────────────────────────────────────
@@ -111,15 +119,18 @@ proc handleCtrlClient(client: AsyncSocket) {.async.} =
       break
     if line.len == 0: break
     var resp: JsonNode
+    var isShutdown = false
     try:
       let j = parseJson(line.strip())
       resp = dispatch(j{"cmd"}.getStr(""), j)
+      isShutdown = j{"cmd"}.getStr("") == "shutdown"
     except CatchableError as e:
       resp = %*{"ok": false, "error": e.msg}
     try:
       await client.send($resp & "\n")
     except CatchableError:
       break
+    if isShutdown: quit(0)
   try: client.close()
   except CatchableError: discard
 
@@ -128,49 +139,58 @@ proc serveCtrl(server: AsyncSocket) {.async.} =
     let client = await server.accept()
     asyncCheck handleCtrlClient(client)
 
-proc handleDataClient(id: int; client: AsyncSocket) {.async.} =
-  while id in sessions:
-    var data = ""
-    try:
-      data = await client.recv(4096)
-    except CatchableError:
-      break
-    if data.len == 0: break
-    if id in sessions:
-      sessions[id].pt.write(data)
-  try: client.close()
-  except CatchableError: discard
-
-proc serveData(sess: DaemonSession) {.async.} =
-  while sess.id in sessions:
-    var client: AsyncSocket
-    try:
-      client = await sess.dataServer.accept()
-    except CatchableError:
-      break
-    sess.dataClients.add(client)
-    asyncCheck handleDataClient(sess.id, client)
-
 proc pollPtyOutput() {.async.} =
   while true:
     var deadSessions: seq[int]
     for id, sess in sessions:
-      var buf: seq[byte]
-      discard sess.pt.readAvailable(buf)
-      if buf.len > 0:
-        let s = cast[string](buf)
-        var dead: seq[int]
-        for i, c in sess.dataClients:
-          try:
-            await c.send(s)
-          except CatchableError:
-            dead.add(i)
-        for i in countdown(dead.len - 1, 0):
-          try: sess.dataClients[i].close()
-          except CatchableError: discard
-          sess.dataClients.del(i)
+      # Accept any newly connected data clients (non-blocking)
+      try:
+        var client: Socket
+        var address = ""
+        sess.dataServer.acceptAddr(client, address)
+        sess.dataClients.add(client)
+        if sess.pendingBuf.len > 0:
+          rawSend(client, sess.pendingBuf)
+          sess.pendingBuf = ""
+      except CatchableError:
+        discard  # EWOULDBLOCK — no pending connection
+
+      # Read input from data clients and forward to PTY
+      var deadInput: seq[int]
+      for i, c in sess.dataClients:
+        var buf: array[4096, byte]
+        let n = nativesockets.recv(c.getFd(), cast[cstring](addr buf[0]), 4096, 0).int
+        if n > 0:
+          sess.pt.write(cast[string](buf[0 ..< n]))
+        elif n == 0:
+          deadInput.add(i)
+        # n < 0: WSAEWOULDBLOCK — no data yet
+      for i in countdown(deadInput.len - 1, 0):
+        try: sess.dataClients[deadInput[i]].close()
+        except CatchableError: discard
+        sess.dataClients.del(deadInput[i])
+
+      # Read PTY output and forward to data clients
+      var ptBuf: seq[byte]
+      discard sess.pt.readAvailable(ptBuf)
+      if ptBuf.len > 0:
+        let s = cast[string](ptBuf)
+        if sess.dataClients.len == 0:
+          sess.pendingBuf.add(s)
+        else:
+          var dead: seq[int]
+          for i, c in sess.dataClients:
+            let sent = nativesockets.send(c.getFd(), cast[cstring](addr s[0]), s.len.cint, 0).int
+            if sent < 0:
+              dead.add(i)
+          for i in countdown(dead.len - 1, 0):
+            try: sess.dataClients[i].close()
+            except CatchableError: discard
+            sess.dataClients.del(i)
+
       if not sess.pt.isAlive():
         deadSessions.add(id)
+
     for id in deadSessions:
       let sess = sessions[id]
       for c in sess.dataClients:
@@ -179,6 +199,7 @@ proc pollPtyOutput() {.async.} =
       try: sess.dataServer.close()
       except CatchableError: discard
       sessions.del(id)
+
     await sleepAsync(1)
 
 # ── public API ────────────────────────────────────────────────────────────────

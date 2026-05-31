@@ -113,17 +113,6 @@ when defined(windows):
 
   proc ptySpawn*(shell: string; args: seq[string];
                  cols = 80'i32; rows = 24'i32; cwd = ""; ptyState: PtyState = PtyState()): Pty =
-    # If we have a valid PTY state, try to reconnect
-    # On POSIX: reconnect using saved PID and masterFd
-    # On Windows: reconnection not supported (ConPTY uses HPCON which can't be transferred)
-    # For MVP 1.1, we accept that restarting will spawn new shells
-    when not defined(windows):
-      # POSIX: Try to reconnect
-      if ptyState.pid > 0:
-        result = ptyReconnect(ptyState.pid, ptyState.masterFd)
-        if result.isAlive():
-          return result
-    
     # Spawn a new PTY
     var hPtyIn, hPtyOut, hAppWrite, hAppRead: HANDLE
     doAssert CreatePipe(addr hPtyIn,  addr hAppWrite, nil, 0) != 0
@@ -295,13 +284,6 @@ else:  # ── POSIX ───────────────────�
 
   proc ptySpawn*(shell: string; args: seq[string];
                  cols = 80'i32; rows = 24'i32; cwd = ""; ptyState: PtyState = PtyState()): Pty =
-    # If we have a valid PTY state, try to reconnect
-    if ptyState.pid > 0:
-      result = ptyReconnect(ptyState.pid, ptyState.masterFd)
-      if result.isAlive():
-        return result
-    
-    # Otherwise spawn a new PTY
     var master, slave: cint
     var ws = Winsize(ws_col: cols.uint16, ws_row: rows.uint16)
     if openpty(addr master, addr slave, nil, nil, addr ws) != 0:
@@ -382,27 +364,4 @@ else:  # ── POSIX ───────────────────�
     try: expandSymlink("/proc/" & $pty.pid.int & "/cwd")
     except: ""
 
-  proc ptyIsReconnectable*(pid: int; masterFd: int): bool =
-    ## Check if a PTY can be reconnected (process exists and handle is valid)
-    ## POSIX: check if process exists and fd is still open
-    if pid <= 0: return false
-    # Check if process exists
-    let procPath = "/proc/" & $pid
-    if not fileExists(procPath): return false
-    # Check if masterFd is still a valid fd (check /proc/pid/fd/)
-    let fdPath = procPath & "/fd/" & $masterFd
-    return fileExists(fdPath)
 
-  proc ptyReconnect*(pid: int; masterFd: int): Pty =
-    ## Reconnect to an existing PTY by PID and master fd
-    ## POSIX: duplicate the master fd and create a new Pty object
-    if pid <= 0 or masterFd < 0:
-      raise newException(ValueError, "Invalid pid or masterFd")
-    
-    # Check if reconnectable
-    if not ptyIsReconnectable(pid, masterFd):
-      raise newException(ValueError, "PTY not reconnectable")
-    
-    result.pid = Pid(pid)
-    result.master = masterFd
-    result.masterFd = masterFd

@@ -1,7 +1,7 @@
 ## IPC client — DaemonPty wraps either a daemon TCP session or a direct Pty.
 ## If the daemon is unavailable, all operations fall through to direct PTY.
 
-import std/[json, net]
+import std/[json, net, nativesockets, os, times]
 import daemon
 import pty
 
@@ -14,7 +14,8 @@ proc connectDaemon*() =
   ## so that all subsequent calls fall back to direct PTY.
   try:
     var s = newSocket()
-    s.connect(DaemonHost, Port(ControlPort), timeout = 3000)
+    s.connect(DaemonHost, Port(ControlPort), timeout = 500)
+    s.getFd().setBlocking(false)
     daemonCtrl = s
   except CatchableError:
     daemonCtrl = nil
@@ -22,10 +23,22 @@ proc connectDaemon*() =
 proc isDaemonConnected*(): bool = daemonCtrl != nil
 
 proc sendCmd(j: JsonNode): JsonNode =
-  daemonCtrl.send($j & "\n")
+  let msg = $j & "\n"
+  discard nativesockets.send(daemonCtrl.getFd(), cast[cstring](unsafeAddr msg[0]), msg.len.cint, 0)
   var line = ""
-  daemonCtrl.readLine(line, timeout = 5000)
-  parseJson(line)
+  let deadline = getTime() + initDuration(milliseconds = 5000)
+  while getTime() < deadline:
+    var chunk: array[4096, byte]
+    let n = nativesockets.recv(daemonCtrl.getFd(), cast[cstring](addr chunk[0]), 4096, 0).int
+    if n > 0:
+      for i in 0 ..< n:
+        if chunk[i] == byte('\n'):
+          return parseJson(line)
+        line.add(char(chunk[i]))
+    elif n == 0:
+      raise newException(IOError, "daemon disconnected")
+    os.sleep(1)
+  raise newException(TimeoutError, "daemon timeout")
 
 # ── DaemonPty type ────────────────────────────────────────────────────────────
 # When isDaemon=true:  data socket carries terminal bytes to/from the daemon.
@@ -35,12 +48,18 @@ type DaemonPty* = ref object
   sessionId*: int
   pid*:       int
   masterFd*:  int
-  isDaemon:   bool
+  isDaemon*:  bool
   # daemon path
   dataPort:   int
   data:       Socket
   # direct PTY fallback path
   directPt:   Pty
+
+proc shutdownDaemon*() =
+  if daemonCtrl == nil: return
+  try: discard sendCmd(%*{"cmd": "shutdown"})
+  except CatchableError: discard
+  daemonCtrl = nil
 
 proc spawnSession*(shell, cwd: string; cols = 80'i32; rows = 24'i32): DaemonPty =
   if daemonCtrl == nil:
@@ -56,6 +75,7 @@ proc spawnSession*(shell, cwd: string; cols = 80'i32; rows = 24'i32): DaemonPty 
   let port = resp["dataPort"].getInt()
   var data = newSocket()
   data.connect(DaemonHost, Port(port), timeout = 3000)
+  data.getFd().setBlocking(false)
   DaemonPty(isDaemon: true, sessionId: id, pid: pid, masterFd: 0,
             dataPort: port, data: data)
 
@@ -70,6 +90,7 @@ proc attachSession*(sessionId: int): DaemonPty =
     let port = sess["dataPort"].getInt()
     var data = newSocket()
     data.connect(DaemonHost, Port(port), timeout = 3000)
+    data.getFd().setBlocking(false)
     return DaemonPty(isDaemon: true, sessionId: sessionId, pid: pid,
                      masterFd: 0, dataPort: port, data: data)
   raise newException(KeyError, "daemon session not found: " & $sessionId)
@@ -87,24 +108,21 @@ proc readAvailable*(dp: DaemonPty; buf: var seq[byte]): int =
   if not dp.isDaemon:
     return dp.directPt.readAvailable(buf)
   if dp.data == nil: return 0
-  var data = newString(4096)
-  var n = 0
-  try: n = dp.data.recv(data, 4096, timeout = 0)
-  except TimeoutError: return 0
-  except CatchableError: return 0
+  var chunk: array[4096, byte]
+  let n = nativesockets.recv(dp.data.getFd(), cast[cstring](addr chunk[0]), 4096, 0).int
   if n > 0:
     let before = buf.len
     buf.setLen(before + n)
-    copyMem(addr buf[before], addr data[0], n)
-  n
+    copyMem(addr buf[before], addr chunk[0], n)
+    return n
+  0
 
 proc write*(dp: DaemonPty; data: string) =
   if data.len == 0: return
   if not dp.isDaemon:
     dp.directPt.write(data)
   elif dp.data != nil:
-    try: dp.data.send(data)
-    except CatchableError: discard
+    discard nativesockets.send(dp.data.getFd(), cast[cstring](unsafeAddr data[0]), data.len.cint, 0)
 
 proc resize*(dp: DaemonPty; cols, rows: int32) =
   if not dp.isDaemon:

@@ -9,7 +9,7 @@ type
     pid*:             int    ## Child process ID
     masterFd*:        int    ## Master file descriptor (Linux/Windows)
     cwd*:             string ## Current working directory
-    daemonSessionId*: int    ## Daemon session ID (0 = not daemon-backed)
+    daemonSessionId*: int    ## Daemon session ID (-1 = not daemon-backed)
 
   SessionData* = object
     ## Complete session data including workspace and PTY states
@@ -61,7 +61,7 @@ proc ptyStatesFromJson(n: JsonNode): Table[int, PtyState] =
         pid:             stateJson{"pid"}.getInt(0),
         masterFd:        stateJson{"masterFd"}.getInt(0),
         cwd:             stateJson{"cwd"}.getStr(""),
-        daemonSessionId: stateJson{"daemonSessionId"}.getInt(0)
+        daemonSessionId: stateJson{"daemonSessionId"}.getInt(-1)
       )
   ptyStates
 

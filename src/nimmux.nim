@@ -183,18 +183,17 @@ proc getPanePorts(pt: DaemonPty): seq[string] =
         result.add(port)
 
 proc main() =
-  # Start daemon for PTY persistence. Failures are non-fatal — app still
-  # works without it, just without session reconnect on restart.
+  # Start daemon for PTY persistence. Wait up to 500ms for it to be ready.
   try:
     if not isDaemonRunning():
       discard spawnDaemon()
-      for _ in 0 ..< 20:  # wait up to 2s
+      for _ in 0 ..< 5:  # wait up to 500ms
         os.sleep(100)
         if isDaemonRunning(): break
-    connectDaemon()  # sets daemonCtrl=nil if unreachable (handled in ipc.nim)
+    connectDaemon()  # 500ms timeout, non-fatal on failure
   except CatchableError:
-    discard  # daemon unavailable; direct PTY fallback active
-  
+    discard
+
   setTraceLogLevel(TraceLogLevel.Error)
   setConfigFlags(flags(ConfigFlags.VsyncHint, ConfigFlags.WindowResizable))
   initWindow(WinW, WinH, "nimmux")
@@ -247,7 +246,7 @@ proc main() =
   for id in ws.leaves():
     let saved = sessionData.ptyStates.getOrDefault(id, PtyState())
     addPane(id, initCols, initRows, saved.cwd,
-            savedDaemonId = if saved.daemonSessionId > 0: saved.daemonSessionId else: -1)
+            savedDaemonId = if saved.daemonSessionId >= 0: saved.daemonSessionId else: -1)
 
   var shouldQuit = false
   var zoomed     = false
@@ -328,6 +327,9 @@ proc main() =
     termKey KeyboardKey.End,      VTermKey.End
     termKey KeyboardKey.PageUp,   VTermKey.PageUp
     termKey KeyboardKey.PageDown, VTermKey.PageDown
+    if isKeyPressed(KeyboardKey.Tab) or isKeyPressedRepeat(KeyboardKey.Tab):
+      states[ws.focused].pt.write("\t")
+      showWelcome = false
 
     var cp = getCharPressed()
     while cp != 0:
@@ -335,6 +337,37 @@ proc main() =
       states[ws.focused].trm.termSendChar(cp.uint32, mods)
       cp = getCharPressed()
       showWelcome = false
+
+    # Raylib filters control chars from GetCharPressed, so Ctrl+letter
+    # combinations never appear there. Send the raw byte directly.
+    # D(split), F(zoom), W(close) are reserved by nimmux.
+    if ctrl and not shift:
+      template ctrlKey(k: KeyboardKey; b: int) =
+        if isKeyPressed(k) or isKeyPressedRepeat(k):
+          states[ws.focused].pt.write($char(b))
+          showWelcome = false
+      ctrlKey KeyboardKey.A,  1
+      ctrlKey KeyboardKey.B,  2
+      ctrlKey KeyboardKey.C,  3  # SIGINT
+      ctrlKey KeyboardKey.E,  5
+      ctrlKey KeyboardKey.G,  7
+      ctrlKey KeyboardKey.H,  8
+      ctrlKey KeyboardKey.J, 10
+      ctrlKey KeyboardKey.K, 11
+      ctrlKey KeyboardKey.L, 12  # clear screen
+      ctrlKey KeyboardKey.M, 13
+      ctrlKey KeyboardKey.N, 14
+      ctrlKey KeyboardKey.O, 15
+      ctrlKey KeyboardKey.P, 16
+      ctrlKey KeyboardKey.Q, 17
+      ctrlKey KeyboardKey.R, 18  # reverse search
+      ctrlKey KeyboardKey.S, 19
+      ctrlKey KeyboardKey.T, 20
+      ctrlKey KeyboardKey.U, 21
+      ctrlKey KeyboardKey.V, 22
+      ctrlKey KeyboardKey.X, 24
+      ctrlKey KeyboardKey.Y, 25
+      ctrlKey KeyboardKey.Z, 26  # SIGTSTP
 
     # read PTY output → libvterm
     for id in ws.leaves():
@@ -347,7 +380,8 @@ proc main() =
     # close panes whose shell has exited
     var deadPanes: seq[int]
     for id in ws.leaves():
-      if not states[id].pt.isAlive():
+      let alive = states[id].pt.isAlive()
+      if not alive:
         deadPanes.add(id)
     for id in deadPanes:
       if ws.leaves().len == 1:
@@ -423,13 +457,12 @@ proc main() =
       pid:             states[id].pt.pid,
       masterFd:        0,
       cwd:             states[id].pt.currentCwd(),
-      daemonSessionId: states[id].pt.sessionId
+      daemonSessionId: if states[id].pt.isDaemon: states[id].pt.sessionId else: -1
     )
   saveSession(SessionData(workspace: ws, ptyStates: ptyStates))
+  shutdownDaemon()
   for id in ws.leaves():
     termFree(states[id].trm)
-    # NOTE: NOT closing PTY - processes continue running in background
-    # This allows session restore to reconnect to existing processes
 
   # clean up any running background processes
   for _, p in gitProcs:
