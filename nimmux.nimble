@@ -15,6 +15,7 @@ bin = @["nimmux"]            ## GUI terminal multiplexer
 binDir = "."
 
 task build_daemon, "Build nimmux-daemon":
+  # src/nimmuxd.nim.cfg overrides the system pthread linker flag on MinGW.
   exec "nim c -d:release --out:nimmux-daemon src/nimmuxd.nim"
 
 task build_all, "Build both nimmux and nimmux-daemon":

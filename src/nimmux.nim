@@ -183,14 +183,17 @@ proc getPanePorts(pt: DaemonPty): seq[string] =
         result.add(port)
 
 proc main() =
-  # Ensure daemon is running for PTY persistence
-  if not isDaemonRunning():
-    discard spawnDaemon()
-    # Wait up to 2s for daemon to be ready
-    for _ in 0 ..< 20:
-      os.sleep(100)
-      if isDaemonRunning(): break
-  connectDaemon()
+  # Start daemon for PTY persistence. Failures are non-fatal — app still
+  # works without it, just without session reconnect on restart.
+  try:
+    if not isDaemonRunning():
+      discard spawnDaemon()
+      for _ in 0 ..< 20:  # wait up to 2s
+        os.sleep(100)
+        if isDaemonRunning(): break
+    connectDaemon()  # sets daemonCtrl=nil if unreachable (handled in ipc.nim)
+  except CatchableError:
+    discard  # daemon unavailable; direct PTY fallback active
   
   setTraceLogLevel(TraceLogLevel.Error)
   setConfigFlags(flags(ConfigFlags.VsyncHint, ConfigFlags.WindowResizable))
