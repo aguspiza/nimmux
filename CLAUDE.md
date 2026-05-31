@@ -59,7 +59,7 @@ Decisions are recorded in [`docs/adr/`](docs/adr/) using [MADR](https://adr.gith
 nimble test                      # run all tests via testament
 nimble build                     # build nimmux binary
 nimble run                       # build and run
-nim c -r tests/test_workspace.nim  # compile and run a single test file
+testament run tests/test_workspace.nim  # run a single test file
 ```
 
 **First-time setup** (generates `nimble.paths`, machine-local — not committed):

@@ -34,7 +34,7 @@ Requires Nim 2.2+ and [naylib](https://github.com/planetis-m/naylib) (`nimble in
 ```sh
 nimble test
 # or a single file:
-nim c -r tests/test_workspace.nim
+testament run tests/test_workspace.nim
 ```
 
 ## Architecture
