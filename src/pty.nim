@@ -10,7 +10,7 @@ when defined(windows):
   type
     HANDLE   = pointer
     HPCON    = pointer
-    DWORD    = uint32
+    DWORD    = culong   # unsigned long — matches MinGW LPDWORD (ptr culong)
     BOOL     = int32
     HRESULT  = int32
     SIZE_T   = uint
@@ -44,7 +44,7 @@ when defined(windows):
       StartupInfo:     STARTUPINFOW
       lpAttributeList: pointer
 
-    PROCESS_INFORMATION = object
+    PROCESS_INFORMATION {.importc: "PROCESS_INFORMATION", header: "<windows.h>".} = object
       hProcess:    HANDLE
       hThread:     HANDLE
       dwProcessId: DWORD
