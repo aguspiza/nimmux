@@ -32,17 +32,25 @@ proc sendCtrl(ctrl: Socket; j: JsonNode): JsonNode =
   parseJson(line)
 
 proc recvBytes(data: Socket; timeoutMs: int): string =
-  ## Drain data socket for up to timeoutMs using raw non-blocking recv.
+  ## Drain data socket for up to timeoutMs. Returns as soon as the socket
+  ## has been quiet for 150 ms after receiving at least one byte, so tests
+  ## don't sit out the full timeout waiting for data that already arrived.
   data.getFd().setBlocking(false)
-  let deadline = getTime() + initDuration(milliseconds = timeoutMs)
+  let deadline  = getTime() + initDuration(milliseconds = timeoutMs)
+  var lastRecv  = getTime()
+  var gotSome   = false
   while getTime() < deadline:
     var chunk: array[4096, byte]
     let n = nativesockets.recv(data.getFd(), cast[cstring](addr chunk[0]), 4096, 0).int
     if n > 0:
       result.add(cast[string](chunk[0 ..< n]))
+      lastRecv = getTime()
+      gotSome  = true
     elif n == 0:
       break  # connection closed
     else:
+      if gotSome and (getTime() - lastRecv).inMilliseconds >= 150:
+        break  # data arrived and socket has been quiet — done
       os.sleep(10)
 
 proc spawnShell(ctrl: Socket; cmd: string): tuple[id, port: int] =
