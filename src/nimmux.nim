@@ -233,6 +233,7 @@ proc main() =
 
   var shouldQuit = false
   var zoomed     = false
+  var prevZoomed = false
   var sidebarExpanded     = true
   var prevSidebarExpanded = true
   var prevW = 0.0'f32
@@ -355,16 +356,24 @@ proc main() =
       let ports = getPanePorts(states[id].pt)
       sidebar.updatePaneInfo(id, cwd, branch, ports, 0)
 
-    # reflow on window resize or sidebar toggle
-    if curW != prevW or curH != prevH or sidebarExpanded != prevSidebarExpanded:
-      prevW = curW; prevH = curH; prevSidebarExpanded = sidebarExpanded
+    # reflow on window resize, sidebar toggle, or zoom toggle
+    if curW != prevW or curH != prevH or sidebarExpanded != prevSidebarExpanded or zoomed != prevZoomed:
+      prevW = curW; prevH = curH; prevSidebarExpanded = sidebarExpanded; prevZoomed = zoomed
       let paneW = curW - sidebarW
-      for (id, rect) in ws.leafRects(Rect(x: sidebarW, y: 0, w: paneW, h: curH)):
+      if zoomed:
+        let id = ws.focused
         let (cw, ch) = cellDims(font, states[id].fontSize)
-        let ncols = max(1'i32, int32(rect.w / cw))
-        let nrows = max(1'i32, int32(rect.h / ch))
+        let ncols = max(1'i32, int32(paneW / cw))
+        let nrows = max(1'i32, int32(curH / ch))
         states[id].trm.termResize(ncols, nrows)
         states[id].pt.resize(ncols, nrows)
+      else:
+        for (id, rect) in ws.leafRects(Rect(x: sidebarW, y: 0, w: paneW, h: curH)):
+          let (cw, ch) = cellDims(font, states[id].fontSize)
+          let ncols = max(1'i32, int32(rect.w / cw))
+          let nrows = max(1'i32, int32(rect.h / ch))
+          states[id].trm.termResize(ncols, nrows)
+          states[id].pt.resize(ncols, nrows)
 
     # render
     beginDrawing()
