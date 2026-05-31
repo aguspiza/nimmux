@@ -184,8 +184,10 @@ proc getPanePorts(pt: DaemonPty): seq[string] =
 
 proc main() =
   # Start daemon for PTY persistence. Wait up to 500ms for it to be ready.
+  var daemonWasRunning = false
   try:
-    if not isDaemonRunning():
+    daemonWasRunning = isDaemonRunning()
+    if not daemonWasRunning:
       discard spawnDaemon()
       for _ in 0 ..< 5:  # wait up to 500ms
         os.sleep(100)
@@ -209,7 +211,7 @@ proc main() =
   var sessionData = loadSession()
   var ws = sessionData.workspace
   var states      = initTable[int, PaneState]()
-  var showWelcome = not sessionData.hasDaemonSessions()
+  var showWelcome = not daemonWasRunning
   var sidebar     = initSidebar(SidebarWidth)
 
   proc onOutput(s: ConstCStr; size: uint64; user: pointer) {.cdecl.} =
