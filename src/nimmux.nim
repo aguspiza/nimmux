@@ -17,7 +17,7 @@ type PaneState = ref object
 const
   WinW   = 1280
   WinH   = 720
-  FontSz = 18'f32
+  FontSz = 16'f32
 
 proc defaultShell(): string =
   when defined(windows):
@@ -28,6 +28,7 @@ proc defaultShell(): string =
     if s.len > 0: s else: "/bin/sh"
 
 proc main() =
+  setTraceLogLevel(TraceLogLevel.Error)
   setConfigFlags(flags(ConfigFlags.VsyncHint, ConfigFlags.WindowResizable))
   initWindow(WinW, WinH, "nimmux")
   setTargetFPS(60)
