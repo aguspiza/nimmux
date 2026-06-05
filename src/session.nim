@@ -89,9 +89,12 @@ proc saveSession*(session: SessionData) =
   saveSession(session, defaultSessionPath())
 
 proc loadSession*(path: string): SessionData =
-  if not fileExists(path): 
+  if not fileExists(path):
     return SessionData(workspace: newWorkspace(), ptyStates: initTable[int, PtyState]())
-  fromJson(parseJson(readFile(path)))
+  try:
+    fromJson(parseJson(readFile(path)))
+  except CatchableError:
+    SessionData(workspace: newWorkspace(), ptyStates: initTable[int, PtyState]())
 
 proc loadSession*(): SessionData = 
   loadSession(defaultSessionPath())

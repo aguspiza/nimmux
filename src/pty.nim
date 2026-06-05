@@ -150,11 +150,11 @@ when defined(windows):
       wdirBuf = newWideCString(cwd)
       wdir = cast[pointer](wdirBuf[0].addr)
     var ok = CreateProcessW(nil, cast[pointer](cmd[0].addr), nil, nil, 0,
-      EXTENDED_STARTUPINFO_PRESENT or CREATE_NEW_PROCESS_GROUP, nil, wdir, addr si, addr result.pi)
+      EXTENDED_STARTUPINFO_PRESENT, nil, wdir, addr si, addr result.pi)
     if ok == 0 and wdir != nil:
       # stale/incompatible cwd — retry without it
       ok = CreateProcessW(nil, cast[pointer](cmd[0].addr), nil, nil, 0,
-        EXTENDED_STARTUPINFO_PRESENT or CREATE_NEW_PROCESS_GROUP, nil, nil, addr si, addr result.pi)
+        EXTENDED_STARTUPINFO_PRESENT, nil, nil, addr si, addr result.pi)
     if ok == 0:
       raise newException(OSError, "CreateProcessW failed (error " & $GetLastError() & ")")
 

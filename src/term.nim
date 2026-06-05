@@ -44,7 +44,7 @@ type
     start_row*, end_row*, start_col*, end_col*: int32
 
   VTermModifier* {.importc: "VTermModifier", size: sizeof(uint8), pure.} = enum
-    None = 0x00, Shift = 0x01, Alt = 0x02, Ctrl = 0x03, AllMods = 0x07
+    None = 0x00, Shift = 0x01, Alt = 0x02, Ctrl = 0x04, AllMods = 0x07
 
   VTermKey* {.importc, pure.} = enum
     None, Enter, Tab, Backspace, Escape,
