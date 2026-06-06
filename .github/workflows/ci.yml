@@ -16,8 +16,26 @@ jobs:
         with:
           nim-version: "2.2.10"
 
+      - name: Cache nimble packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.nimble/pkgs2
+            ~/.nimble/packages_official.json
+          key: ${{ runner.os }}-nimble-${{ hashFiles('*.nimble') }}
+          restore-keys: ${{ runner.os }}-nimble-
+
       - name: Install dependencies
         run: nimble install -y --depsOnly
 
+      - name: Build nimmux-daemon
+        # Pre-compiling the daemon warms the Nim compilation cache so that
+        # test_daemon_ipc (which imports asyncdispatch) doesn't recompile it
+        # from scratch and hit memory limits on the Linux runner.
+        # On Windows the daemon is already built by nimble build_all locally;
+        # we build it here so the CI binary is available for IPC tests.
+        run: nim c -d:release --out:nimmux-daemon src/nimmuxd.nim
+
       - name: Run tests
+        timeout-minutes: 5
         run: testament pattern "tests/test_*.nim"
