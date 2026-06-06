@@ -24,6 +24,7 @@ proc toRColor(rgb: array[3, uint8]): Color =
 proc loadTermFont*(fontSize: int32): Font =
   let cps = buildTermCodepoints()
   const candidates = when defined(windows): [
+      r"C:\Windows\Fonts\CascadiaMono.ttf",
       r"C:\Windows\Fonts\consola.ttf",
       r"C:\Windows\Fonts\lucon.ttf",
       r"C:\Windows\Fonts\cour.ttf",
