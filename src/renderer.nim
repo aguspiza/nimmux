@@ -20,7 +20,18 @@ const
 proc toRColor(rgb: array[3, uint8]): Color =
   Color(r: rgb[0], g: rgb[1], b: rgb[2], a: 255)
 
+proc buildTermCodepoints(): seq[int32] =
+  for c in 0x0020..0x007E: result.add(c.int32)  # printable ASCII
+  for c in 0x00A0..0x00FF: result.add(c.int32)  # Latin-1 supplement
+  for c in 0x0100..0x017F: result.add(c.int32)  # Latin Extended-A
+  for c in 0x2018..0x201F: result.add(c.int32)  # curly quotes
+  for c in 0x2500..0x257F: result.add(c.int32)  # box drawing  ─│┌┐└┘├┤┬┴┼…
+  for c in 0x2580..0x259F: result.add(c.int32)  # block elements ▀▄█▌▐
+  for c in 0x25A0..0x25FF: result.add(c.int32)  # geometric shapes ●○◆◇
+  for c in 0x2800..0x28FF: result.add(c.int32)  # braille (progress bars)
+
 proc loadTermFont*(fontSize: int32): Font =
+  let cps = buildTermCodepoints()
   const candidates = when defined(windows): [
       r"C:\Windows\Fonts\consola.ttf",
       r"C:\Windows\Fonts\lucon.ttf",
@@ -32,7 +43,7 @@ proc loadTermFont*(fontSize: int32): Font =
     ]
   for path in candidates:
     if fileExists(path):
-      result = loadFont(path, fontSize, 512)
+      result = loadFont(path, fontSize, cps)
       setTextureFilter(result.texture, TextureFilter.Bilinear)
       return result
   getFontDefault()
