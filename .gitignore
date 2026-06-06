@@ -1,4 +1,5 @@
 nimcache/
+testcache/
 *.exe
 *.dll
 *.so

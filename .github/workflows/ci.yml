@@ -29,12 +29,10 @@ jobs:
         run: nimble install -y --depsOnly
 
       - name: Build nimmux-daemon
-        # Pre-compiling the daemon warms the Nim compilation cache so that
-        # test_daemon_ipc (which imports asyncdispatch) doesn't recompile it
-        # from scratch and hit memory limits on the Linux runner.
-        # On Windows the daemon is already built by nimble build_all locally;
-        # we build it here so the CI binary is available for IPC tests.
-        run: nim c -d:release --out:nimmux-daemon src/nimmuxd.nim
+        # Build with the same -d:release and --nimcache path as tests/nim.cfg
+        # so asyncdispatch and other heavy modules are compiled once here and
+        # reused by testament without GCC recompiling them from scratch.
+        run: nim c -d:release --nimcache:testcache --out:nimmux-daemon src/nimmuxd.nim
 
       - name: Run tests
         timeout-minutes: 5
