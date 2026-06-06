@@ -61,13 +61,13 @@ proc getGitBranch(cwd: string): string =
       try:
         gitProcs[cwd] = startProcess("git",
           args = ["-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"],
-          options = {poUsePath, poStdErrToStdOut})
+          options = {poUsePath, poStdErrToStdOut, poDaemon})
       except: discard
   elif cwd notin gitProcs:
     try:
       gitProcs[cwd] = startProcess("git",
         args = ["-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"],
-        options = {poUsePath, poStdErrToStdOut})
+        options = {poUsePath, poStdErrToStdOut, poDaemon})
     except: discard
 
 # ── port detection (non-blocking) ─────────────────────────────────────────────
@@ -90,7 +90,7 @@ when defined(windows):
     if winNetstatProc == nil and epochTime() - winNetstatTime >= CacheInterval:
       try:
         winNetstatProc = startProcess("netstat.exe", args = ["-ano"],
-                                      options = {poUsePath, poStdErrToStdOut})
+                                      options = {poUsePath, poStdErrToStdOut, poDaemon})
       except: discard
 
   proc pollWinProcMap() =
@@ -112,7 +112,7 @@ when defined(windows):
       try:
         winProcMapProc = startProcess("wmic",
           args = ["process", "get", "ProcessId,ParentProcessId", "/format:csv"],
-          options = {poUsePath, poStdErrToStdOut})
+          options = {poUsePath, poStdErrToStdOut, poDaemon})
       except: discard
 
   proc isInFamily(pid, rootPid: int): bool =
