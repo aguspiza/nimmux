@@ -70,7 +70,7 @@ proc drawPane*(font: Font; fontSize: float32;
           CursorColor)
 
       let cp = cell.chars[0]
-      if cp > 31:
+      if cp > 31'u32 and cp <= 0x10FFFF'u32:
         drawTextCodepoint(font, Rune(cp),
                           Vector2(x: px, y: py),
                           cellH, toRColor(cell.fg.toRGB(DefaultFG)))

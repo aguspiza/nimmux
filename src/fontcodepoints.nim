@@ -7,6 +7,7 @@ proc buildTermCodepoints*(): seq[int32] =
   for c in 0x0100..0x017F: result.add(c.int32)  # Latin Extended-A
   for c in 0x2000..0x206F: result.add(c.int32)  # general punctuation • …
   for c in 0x2100..0x214F: result.add(c.int32)  # letterlike symbols ℹ
+  for c in 0x2150..0x218F: result.add(c.int32)  # number forms ⅓ ½ ¾ Ⅰ Ⅱ Ⅲ
   for c in 0x2190..0x21FF: result.add(c.int32)  # arrows → ← ↑ ↓
   for c in 0x2200..0x22FF: result.add(c.int32)  # math operators ⊕ ⊗ ⊙
   for c in 0x2300..0x23FF: result.add(c.int32)  # misc technical ⌘ ⌃ ⌥ ⏎
