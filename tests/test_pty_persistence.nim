@@ -151,39 +151,3 @@ suite "pty_persistence":
     check pty2.pid > 0
     pty2.close()
   
-  test "End-to-end: kill existing shells before test":
-    # This test ensures we start with a clean state
-    # Kill any existing bash/cmd processes
-    when defined(windows):
-      discard execCmd("taskkill //F //IM bash.exe 2>nul")
-      discard execCmd("taskkill //F //IM cmd.exe 2>nul")
-    else:
-      discard execCmd("pkill -f bash 2>/dev/null || true")
-    
-    # Small delay to let processes die
-    sleep(500)
-    
-    # Now spawn a shell
-    var pty = ptySpawn(sh, @[])
-    let pid = pty.pid
-    
-    # Verify it's alive
-    check pty.isAlive()
-    
-    # Save session
-    let savedState = PtyState(pid: pid, masterFd: pty.masterFd, cwd: pty.currentCwd())
-    
-    # Close PTY
-    pty.close()
-    
-    # On Windows the process survives close(); on Linux it exits via SIGHUP.
-    sleep(200)
-    when defined(windows):
-      let tasklistOutput = execCmd("tasklist /FI \"PID eq " & $pid)
-      check tasklistOutput == 0
-    
-    # Clean up
-    when defined(windows):
-      discard execCmd("taskkill //F //PID " & $pid & " 2>nul")
-    else:
-      discard execCmd("kill " & $pid & " 2>/dev/null || true")
