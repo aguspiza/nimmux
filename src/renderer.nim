@@ -1,8 +1,8 @@
 ## Raylib terminal cell renderer.
 
-import std/[os, unicode]
+import std/[os, sets, unicode]
 import raylib
-import term, workspace, fontcodepoints
+import term, workspace, fontcodepoints, fontprobe
 
 const
   DefaultFG: array[3, uint8] = [220'u8, 220, 220]
@@ -20,33 +20,78 @@ const
 proc toRColor(rgb: array[3, uint8]): Color =
   Color(r: rgb[0], g: rgb[1], b: rgb[2], a: 255)
 
+type TermFonts* = object
+  primary*: Font
+  fallback*: Font
+  ext*: Font
+  primCoverage*: HashSet[int32]
+  fallCoverage*: HashSet[int32]
 
-proc loadTermFont*(fontSize: int32): Font =
-  let cps = buildTermCodepoints()
-  const candidates = when defined(windows): [
+proc loadOneFont(path: string; fontSize: int32; cps: seq[int32]): Font =
+  result = loadFont(path, fontSize, cps)
+  setTextureFilter(result.texture, TextureFilter.Bilinear)
+
+proc findFont(candidates: openArray[string]): string =
+  for p in candidates:
+    if fileExists(p): return p
+  ""
+
+proc loadTermFont*(fontSize: int32): TermFonts =
+  ## Loads up to 3 fonts: primary (best TUI coverage), fallback (math/symbols),
+  ## ext (comprehensive BMP fallback). Each font only loads codepoints it
+  ## actually has, as determined by TrueType cmap parsing.
+  const primCandidates = when defined(windows): [
       r"C:\Windows\Fonts\CascadiaMono.ttf",
       r"C:\Windows\Fonts\consola.ttf",
       r"C:\Windows\Fonts\lucon.ttf",
-      r"C:\Windows\Fonts\cour.ttf",
     ] else: [
       "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
       "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
       "/usr/share/fonts/truetype/ubuntu/UbuntuMono-R.ttf",
     ]
-  for path in candidates:
-    if fileExists(path):
-      result = loadFont(path, fontSize, cps)
-      setTextureFilter(result.texture, TextureFilter.Bilinear)
-      return result
-  getFontDefault()
+  const fallCandidates = when defined(windows): [
+      r"C:\Windows\Fonts\DejaVuSansMono.ttf",
+      r"C:\Windows\Fonts\cour.ttf",
+    ] else: [
+      "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+      "/usr/share/fonts/truetype/ubuntu/UbuntuMono-R.ttf",
+    ]
+  const extCandidates = when defined(windows): [
+      r"C:\Windows\Fonts\seguisym.ttf",
+    ] else: [
+      "/usr/share/fonts/truetype/ancient-fonts/Symbola.ttf",
+      "/usr/share/fonts/opentype/noto/NotoSansSymbols2-Regular.otf",
+    ]
+  let allCps   = buildTermCodepoints()
+  let primPath = findFont(primCandidates)
+  let fallPath = findFont(fallCandidates)
+  let extPath  = findFont(extCandidates)
+
+  let primCov = if primPath != "": fontCoverage(primPath) else: @[]
+  let fallCov = if fallPath != "": fontCoverage(fallPath) else: @[]
+  result.primCoverage = primCov.toHashSet()
+  result.fallCoverage = fallCov.toHashSet()
+
+  var primCps, fallCps, extCps: seq[int32]
+  for cp in allCps:
+    if cp in result.primCoverage:   primCps.add(cp)
+    elif cp in result.fallCoverage: fallCps.add(cp)
+    else:                           extCps.add(cp)
+
+  if primPath != "": result.primary  = loadOneFont(primPath, fontSize, primCps)
+  if fallPath != "" and fallCps.len > 0:
+    result.fallback = loadOneFont(fallPath, fontSize, fallCps)
+  if extPath != "" and extCps.len > 0:
+    result.ext = loadOneFont(extPath, fontSize, extCps)
+
+  if not isFontValid(result.primary): result.primary = getFontDefault()
 
 proc cellDims*(font: Font; fontSize: float32): (float32, float32) =
   let m = measureText(font, "M", fontSize, 0)
   (m.x, m.y)
 
-proc drawPane*(font: Font; fontSize: float32;
-               t: Terminal; r: Rect; focused: bool) =
-  let (cellW, cellH) = cellDims(font, fontSize)
+proc drawPane*(tf: TermFonts; fontSize: float32; t: Terminal; r: Rect; focused: bool) =
+  let (cellW, cellH) = cellDims(tf.primary, fontSize)
   let cols = int(r.w / cellW)
   let rows = int(r.h / cellH)
 
@@ -72,9 +117,16 @@ proc drawPane*(font: Font; fontSize: float32;
 
       let cp = cell.chars[0]
       if cp > 31'u32 and cp <= 0x10FFFF'u32:
-        drawTextCodepoint(font, Rune(cp),
-                          Vector2(x: px, y: py),
-                          cellH, toRColor(cell.fg.toRGB(DefaultFG)))
+        let rune  = Rune(cp)
+        let color = toRColor(cell.fg.toRGB(DefaultFG))
+        if cp.int32 in tf.primCoverage:
+          drawTextCodepoint(tf.primary, rune, Vector2(x: px, y: py), cellH, color)
+        elif cp.int32 in tf.fallCoverage:
+          drawTextCodepoint(tf.fallback, rune, Vector2(x: px, y: py), cellH, color)
+        elif isFontValid(tf.ext):
+          drawTextCodepoint(tf.ext, rune, Vector2(x: px, y: py), cellH, color)
+        else:
+          drawTextCodepoint(tf.primary, rune, Vector2(x: px, y: py), cellH, color)
 
 proc drawWelcome*(font: Font; cellH: float32; sw, sh: float32) =
   const

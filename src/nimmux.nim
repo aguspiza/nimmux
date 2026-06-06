@@ -202,8 +202,8 @@ proc main() =
   defer: closeWindow()
   setTargetFPS(60)
 
-  let font             = loadTermFont(BaseFontSz)
-  let (initCw, initCh) = cellDims(font, FontSz)
+  let fonts            = loadTermFont(BaseFontSz)
+  let (initCw, initCh) = cellDims(fonts.primary, FontSz)
   let initCols         = int32(WinW.float32 / initCw)
   let initRows         = int32(WinH.float32 / initCh)
   let shell            = defaultShell()
@@ -243,7 +243,7 @@ proc main() =
     let sh = getScreenHeight().float32
     for (pid, rect) in ws.leafRects(Rect(x: 0, y: 0, w: sw, h: sh)):
       if pid == id:
-        let (cw, ch) = cellDims(font, states[id].fontSize)
+        let (cw, ch) = cellDims(fonts.primary, states[id].fontSize)
         let ncols = max(1'i32, int32(rect.w / cw))
         let nrows = max(1'i32, int32(rect.h / ch))
         states[id].trm.termResize(ncols, nrows)
@@ -449,14 +449,14 @@ proc main() =
       let paneW = curW - sidebarW
       if zoomed:
         let id = ws.focused
-        let (cw, ch) = cellDims(font, states[id].fontSize)
+        let (cw, ch) = cellDims(fonts.primary, states[id].fontSize)
         let ncols = max(1'i32, int32(paneW / cw))
         let nrows = max(1'i32, int32(curH / ch))
         states[id].trm.termResize(ncols, nrows)
         states[id].pt.resize(ncols, nrows)
       else:
         for (id, rect) in ws.leafRects(Rect(x: sidebarW, y: 0, w: paneW, h: curH)):
-          let (cw, ch) = cellDims(font, states[id].fontSize)
+          let (cw, ch) = cellDims(fonts.primary, states[id].fontSize)
           let ncols = max(1'i32, int32(rect.w / cw))
           let nrows = max(1'i32, int32(rect.h / ch))
           states[id].trm.termResize(ncols, nrows)
@@ -476,19 +476,19 @@ proc main() =
       let sh = getScreenHeight().float32
       let paneW = sw - sidebarW
       if zoomed:
-        drawPane(font, states[ws.focused].fontSize, states[ws.focused].trm,
+        drawPane(fonts, states[ws.focused].fontSize, states[ws.focused].trm,
                  Rect(x: sidebarW, y: 0, w: paneW, h: sh), true)
       else:
         for (id, rect) in ws.leafRects(Rect(x: sidebarW, y: 0, w: paneW, h: sh)):
-          drawPane(font, states[id].fontSize, states[id].trm, rect, id == ws.focused)
+          drawPane(fonts, states[id].fontSize, states[id].trm, rect, id == ws.focused)
       if sidebarExpanded:
-        let clickedPane = drawSidebar(font, initCh, Rect(x: 0, y: 0, w: sidebarW, h: sh), sidebar, ws.focused)
+        let clickedPane = drawSidebar(fonts.primary, initCh, Rect(x: 0, y: 0, w: sidebarW, h: sh), sidebar, ws.focused)
         if clickedPane != -1:
           ws.setFocus(clickedPane)
           showWelcome = false
           dirty = true
       if showWelcome:
-        drawWelcome(font, initCh, sw, sh)
+        drawWelcome(fonts.primary, initCh, sw, sh)
       endDrawing()
     else:
       pollInputEvents()  # advance input state when skipping endDrawing
