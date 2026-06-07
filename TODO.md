@@ -6,6 +6,6 @@
 
 ## Features
 
-- [ ] **Scroll wheel support** — scroll terminal output with mouse wheel
+- [x] **Scroll wheel support** — scroll terminal output with mouse wheel (5000-line scrollback buffer)
 - [x] **Select to copy** — click-drag selects text, copies to clipboard on release
 - [x] **MMB to paste** — middle mouse button pastes clipboard into focused pane

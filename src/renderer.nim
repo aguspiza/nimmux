@@ -112,11 +112,12 @@ proc drawPane*(tf: var TermFonts; fontSize: float32; t: Terminal; r: Rect; focus
   drawRectangleLines(r.x.int32, r.y.int32, r.w.int32, r.h.int32,
                      if focused: FocusBorderColor else: BorderColor)
 
-  let cur = termCursorPos(t)
+  let cur        = termCursorPos(t)
+  let showCursor = focused and t.scrollOffset == 0
 
   for row in 0 ..< min(rows, t.rows.int):
     for col in 0 ..< min(cols, t.cols.int):
-      let cell = termCell(t, row.int32, col.int32)
+      let cell = termScrollCell(t, row.int32, col.int32)
       let px = r.x + col.float32 * cellW
       let py = r.y + row.float32 * cellH
 
@@ -124,7 +125,7 @@ proc drawPane*(tf: var TermFonts; fontSize: float32; t: Terminal; r: Rect; focus
         Rectangle(x: px, y: py, width: cellW, height: cellH),
         toRColor(cell.bg.toRGB(DefaultBG)))
 
-      if focused and row == cur.row.int and col == cur.col.int:
+      if showCursor and row == cur.row.int and col == cur.col.int:
         drawRectangle(
           Rectangle(x: px, y: py, width: cellW, height: cellH),
           CursorColor)

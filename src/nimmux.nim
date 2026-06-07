@@ -426,6 +426,7 @@ proc main() =
       if n > 0:
         ps.trm.termAdvance(ps.buf.toOpenArray(ps.buf.len - n, ps.buf.len - 1))
         ps.buf.setLen(0)
+        ps.trm.termScrollReset()
         dirty = true
 
     # close panes whose shell has exited (IPC check ~1 Hz)
@@ -464,8 +465,24 @@ proc main() =
         sidebar.updatePaneInfo(id, cwd, branch, ports, 0)
       dirty = true  # sidebar info refreshed
 
-    # selection: left-button drag → copy text to clipboard on release
+    # scroll wheel: scroll the pane under the mouse
     let pArea = Rect(x: sidebarW, y: 0, w: curW - sidebarW, h: curH)
+    let wheel = getMouseWheelMove()
+    if wheel != 0:
+      var scrollTarget = -1
+      if zoomed:
+        scrollTarget = ws.focused
+      else:
+        for (id, rect) in ws.leafRects(pArea):
+          if curMousePos.x >= rect.x and curMousePos.x < rect.x + rect.w and
+             curMousePos.y >= rect.y and curMousePos.y < rect.y + rect.h:
+            scrollTarget = id
+            break
+      if scrollTarget >= 0 and scrollTarget in states:
+        states[scrollTarget].trm.termScroll(int(wheel) * 3)
+        dirty = true
+
+    # selection: left-button drag → copy text to clipboard on release
     if isMouseButtonPressed(MouseButton.Left):
       selActive = false
       selDragging = false

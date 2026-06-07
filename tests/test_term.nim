@@ -58,3 +58,47 @@ suite "term":
     let text = termGetText(t, 0, 0, 1, 4)
     check text == "line1\nline2"
     termFree(t)
+
+  test "scrollback buffer fills on scroll":
+    var t = termNew(80, 5)  # 5-row terminal forces scrolling quickly
+    for i in 1..10:
+      termAdvance(t, "line" & $i & "\r\n")
+    check t.scrollback.lines.len >= 5
+    termFree(t)
+
+  test "termScroll changes scrollOffset":
+    var t = termNew(80, 5)
+    for i in 1..10: termAdvance(t, "x\r\n")
+    let sbLen = t.scrollback.lines.len
+    termScroll(t, 2)
+    check t.scrollOffset == 2
+    termScroll(t, -10)  # clamp to 0
+    check t.scrollOffset == 0
+    termScroll(t, 9999)  # clamp to sbLen
+    check t.scrollOffset == sbLen
+    termFree(t)
+
+  test "termScrollReset goes to bottom":
+    var t = termNew(80, 5)
+    for i in 1..10: termAdvance(t, "x\r\n")
+    termScroll(t, 3)
+    termScrollReset(t)
+    check t.scrollOffset == 0
+    termFree(t)
+
+  test "termScrollCell reads live screen at offset 0":
+    var t = termNew(80, 24)
+    termAdvance(t, "hello")
+    check termScrollCell(t, 0, 0).chars[0] == 'h'.uint32
+    termFree(t)
+
+  test "termScrollCell reads scrollback when offset > 0":
+    var t = termNew(80, 5)
+    termAdvance(t, "AAAAAA\r\n")  # this line will scroll off
+    for i in 1..5: termAdvance(t, "x\r\n")
+    check t.scrollback.lines.len >= 1
+    termScroll(t, t.scrollback.lines.len)  # scroll all the way up
+    # first scrollback line should have 'A'
+    let cell = termScrollCell(t, 0, 0)
+    check cell.chars[0] == 'A'.uint32
+    termFree(t)

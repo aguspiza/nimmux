@@ -194,21 +194,53 @@ proc toRGB*(c: VTermColor; defaultRGB: array[3, uint8]): array[3, uint8] =
 
 # ── Terminal wrapper ──────────────────────────────────────────────────────────
 
-type Terminal* = object
-  vt*:     ptr VTerm
-  screen*: ptr VTermScreen
-  state*:  ptr VTermState
-  cols*, rows*: int32
+type
+  ScrollbackBuf* = ref object
+    lines*: seq[seq[VTermScreenCell]]
+
+  Terminal* = object
+    vt*:           ptr VTerm
+    screen*:       ptr VTermScreen
+    state*:        ptr VTermState
+    cols*, rows*:  int32
+    scrollback*:   ScrollbackBuf
+    scrollOffset*: int  # 0 = live screen; N = N lines above current top
 
 func ch*(cell: VTermScreenCell): char = char(cell.chars[0])
 
 proc termNew*(cols, rows: int32): Terminal =
-  result.cols   = cols
-  result.rows   = rows
-  result.vt     = vterm_new(rows, cols)
+  result.cols       = cols
+  result.rows       = rows
+  result.vt         = vterm_new(rows, cols)
   vterm_set_utf8(result.vt, true)
-  result.screen = vterm_obtain_screen(result.vt)
-  result.state  = vterm_obtain_state(result.vt)
+  result.screen     = vterm_obtain_screen(result.vt)
+  result.state      = vterm_obtain_state(result.vt)
+  result.scrollback = ScrollbackBuf()
+
+  var screenCbs {.global.}: VTermScreenCallbacks
+  if screenCbs.sb_pushline == nil:
+    screenCbs.sb_pushline = proc(cols: int32; cells: ptr VTermScreenCell;
+                                  user: pointer): int32 {.cdecl.} =
+      let sb = cast[ScrollbackBuf](user)
+      var line = newSeq[VTermScreenCell](cols)
+      if cols > 0:
+        copyMem(line[0].addr, cells, cols.int * sizeof(VTermScreenCell))
+      sb.lines.add(line)
+      if sb.lines.len > 5000: sb.lines.delete(0)
+      1
+    screenCbs.sb_popline = proc(cols: int32; cells: ptr VTermScreenCell;
+                                 user: pointer): int32 {.cdecl.} =
+      let sb = cast[ScrollbackBuf](user)
+      if sb.lines.len == 0: return 0
+      let line = sb.lines[^1]
+      sb.lines.setLen(sb.lines.len - 1)
+      let n = min(cols.int, line.len)
+      if n > 0: copyMem(cells, line[0].unsafeAddr, n * sizeof(VTermScreenCell))
+      1
+    screenCbs.sb_clear = proc(user: pointer): int32 {.cdecl.} =
+      cast[ScrollbackBuf](user).lines.setLen(0); 1
+  vterm_screen_set_callbacks(result.screen, addr screenCbs,
+                              cast[pointer](result.scrollback))
   vterm_screen_reset(result.screen, 1)
 
 proc termFree*(t: var Terminal) =
@@ -243,6 +275,25 @@ proc termSendKey*(t: var Terminal; key: VTermKey; mods = VTermModifier.None) =
 
 proc termSendChar*(t: var Terminal; c: uint32; mods = VTermModifier.None) =
   vterm_keyboard_unichar(t.vt, c, mods)
+
+proc termScroll*(t: var Terminal; delta: int) =
+  t.scrollOffset = clamp(t.scrollOffset + delta, 0, t.scrollback.lines.len)
+
+proc termScrollReset*(t: var Terminal) =
+  t.scrollOffset = 0
+
+proc termScrollCell*(t: Terminal; displayRow, col: int32): VTermScreenCell =
+  if t.scrollOffset == 0: return termCell(t, displayRow, col)
+  let sbLen = t.scrollback.lines.len
+  let vRow  = sbLen - t.scrollOffset + displayRow.int
+  if vRow < 0: return VTermScreenCell()
+  if vRow < sbLen:
+    let line = t.scrollback.lines[vRow]
+    if col.int < line.len: return line[col]
+    return VTermScreenCell()
+  let liveRow = int32(vRow - sbLen)
+  if liveRow < t.rows: return termCell(t, liveRow, col)
+  VTermScreenCell()
 
 proc termGetText*(t: Terminal; r1, c1, r2, c2: int): string =
   for row in r1..r2:
