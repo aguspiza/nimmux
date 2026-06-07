@@ -300,7 +300,8 @@ proc main() =
     # mark dirty on any keyboard or mouse input
     if getKeyPressed() != KeyboardKey.Null or
        isMouseButtonPressed(MouseButton.Left) or isMouseButtonReleased(MouseButton.Left) or
-       isMouseButtonPressed(MouseButton.Right) or isMouseButtonReleased(MouseButton.Right):
+       isMouseButtonPressed(MouseButton.Right) or isMouseButtonReleased(MouseButton.Right) or
+       isMouseButtonPressed(MouseButton.Middle):
       dirty = true
     let curMousePos = getMousePosition()
     if curMousePos.x != prevMousePos.x or curMousePos.y != prevMousePos.y:
@@ -511,6 +512,13 @@ proc main() =
     # clear selection on any keystroke
     if getKeyPressed() != KeyboardKey.Null:
       selActive = false; selDragging = false
+
+    # middle mouse button: paste clipboard into focused pane
+    if isMouseButtonPressed(MouseButton.Middle):
+      let clip = getClipboardText()
+      if clip.len > 0:
+        states[ws.focused].pt.write(clip)
+        showWelcome = false
 
     # reflow on window resize, sidebar toggle, or zoom toggle
     if curW != prevW or curH != prevH or sidebarExpanded != prevSidebarExpanded or zoomed != prevZoomed:
