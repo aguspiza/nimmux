@@ -8,4 +8,5 @@
 ## Features
 
 - [ ] **Scroll wheel support** — scroll terminal output with mouse wheel
-- [ ] **Select to copy + MMB to paste** — click-drag selects text, middle mouse button pastes
+- [x] **Select to copy** — click-drag selects text, copies to clipboard on release
+- [ ] **MMB to paste** — middle mouse button pastes clipboard into focused pane
