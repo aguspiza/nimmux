@@ -319,6 +319,16 @@ proc main() =
       addPane(newId, ncols, nrows, fontSize = focusFs)
       ws.setFocus(newId)
       showWelcome = false
+      # reflow all panes to their actual post-split sizes
+      let sw = getScreenWidth().float32
+      let sh = getScreenHeight().float32
+      let sbw = if sidebarExpanded: SidebarWidth else: 0.0'f32
+      for (pid, rect) in ws.leafRects(Rect(x: sbw, y: 0, w: sw - sbw, h: sh)):
+        let (cw, ch) = cellDims(fonts.primary, states[pid].fontSize)
+        let nc = max(1'i32, int32(rect.w / cw))
+        let nr = max(1'i32, int32(rect.h / ch))
+        states[pid].trm.termResize(nc, nr)
+        states[pid].pt.resize(nc, nr)
 
     # close focused pane: Ctrl+W
     if ctrl and isKeyPressed(KeyboardKey.W):
