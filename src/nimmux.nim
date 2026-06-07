@@ -525,6 +525,10 @@ proc main() =
         if text.strip().len > 0:
           setClipboardText(text)
           selActive = true
+      elif selPane in states:
+        ws.setFocus(selPane)
+        showWelcome = false
+        dirty = true
 
     # clear selection on any keystroke
     if getKeyPressed() != KeyboardKey.Null:
