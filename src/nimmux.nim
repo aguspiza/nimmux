@@ -305,6 +305,7 @@ proc main() =
       if ws.leaves().len == 1:
         shouldQuit = true
       else:
+        sidebar.removePaneInfo(id)
         termFree(states[id].trm)
         # NOTE: NOT closing PTY - processes continue running in background
         # This allows session restore to reconnect to existing processes
@@ -483,7 +484,7 @@ proc main() =
           drawPane(fonts, states[id].fontSize, states[id].trm, rect, id == ws.focused)
       if sidebarExpanded:
         let clickedPane = drawSidebar(fonts.primary, initCh, Rect(x: 0, y: 0, w: sidebarW, h: sh), sidebar, ws.focused)
-        if clickedPane != -1:
+        if clickedPane != -1 and clickedPane in states:
           ws.setFocus(clickedPane)
           showWelcome = false
           dirty = true

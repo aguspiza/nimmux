@@ -186,6 +186,12 @@ proc initSidebar*(width: float32): SidebarState =
   result.width = width
   result.panes = @[]
 
+proc removePaneInfo*(sb: var SidebarState; id: int) =
+  for i in 0..<sb.panes.len:
+    if sb.panes[i].id == id:
+      sb.panes.delete(i)
+      return
+
 proc updatePaneInfo*(sb: var SidebarState; id: int; cwd, branch: string;
                       ports: seq[string]; notifCount: int; source = "local") =
   for i in 0..<sb.panes.len:
