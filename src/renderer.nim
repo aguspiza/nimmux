@@ -90,7 +90,7 @@ proc cellDims*(font: Font; fontSize: float32): (float32, float32) =
   let m = measureText(font, "M", fontSize, 0)
   (m.x, m.y)
 
-proc drawPane*(tf: TermFonts; fontSize: float32; t: Terminal; r: Rect; focused: bool) =
+proc drawPane*(tf: var TermFonts; fontSize: float32; t: Terminal; r: Rect; focused: bool) =
   let (cellW, cellH) = cellDims(tf.primary, fontSize)
   let cols = int(r.w / cellW)
   let rows = int(r.h / cellH)

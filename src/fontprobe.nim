@@ -27,6 +27,22 @@ proc numGlyphs(d: openArray[byte]): int =
   if off < 0 or off + 6 > d.len: return 0
   ru16(d, off + 4).int
 
+proc hasGlyphFmt12(d: openArray[byte]; base, maxGlyphs: int; cp: uint32): bool =
+  let nGroups = ru32(d, base + 12).int
+  var lo = 0; var hi = nGroups - 1
+  while lo <= hi:
+    let mid = (lo + hi) div 2
+    let r   = base + 16 + mid * 12
+    if r + 12 > d.len: return false
+    let sC = ru32(d, r)
+    let eC = ru32(d, r + 4)
+    if cp < sC: hi = mid - 1
+    elif cp > eC: lo = mid + 1
+    else:
+      let glyphId = ru32(d, r + 8) + cp - sC
+      return glyphId != 0 and glyphId.int < maxGlyphs
+  false
+
 proc hasGlyphFmt4(d: openArray[byte]; base, maxGlyphs: int; cp: uint32): bool =
   let segCount = ru16(d, base + 6).int div 2
   let endBase   = base + 14
@@ -62,6 +78,7 @@ proc fontCoverage*(path: string): seq[int32] =
 
   let numSub = ru16(d, cmapOff + 2).int
   var fmt4Off = -1
+  var fmt12Off = -1
   for i in 0..<numSub:
     let r   = cmapOff + 4 + i * 8
     if r + 8 > d.len: break
@@ -69,11 +86,14 @@ proc fontCoverage*(path: string): seq[int32] =
     let eid = ru16(d, r + 2)
     let off = cmapOff + ru32(d, r + 4).int
     if pid == 0 or (pid == 3 and (eid == 1 or eid == 10)):
-      if off + 2 <= d.len and ru16(d, off) == 4:
-        fmt4Off = off
-        break
-  if fmt4Off < 0: return @[]
+      if off + 2 > d.len: continue
+      let fmt = ru16(d, off)
+      if fmt == 4  and fmt4Off  < 0: fmt4Off  = off
+      if fmt == 12 and fmt12Off < 0: fmt12Off = off
+  if fmt4Off < 0 and fmt12Off < 0: return @[]
 
   for cp in buildTermCodepoints():
-    if hasGlyphFmt4(d, fmt4Off, maxG, cp.uint32):
-      result.add(cp)
+    let found =
+      if fmt12Off >= 0: hasGlyphFmt12(d, fmt12Off, maxG, cp.uint32)
+      else:             hasGlyphFmt4(d, fmt4Off,  maxG, cp.uint32)
+    if found: result.add(cp)

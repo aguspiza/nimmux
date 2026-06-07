@@ -202,7 +202,7 @@ proc main() =
   defer: closeWindow()
   setTargetFPS(60)
 
-  let fonts            = loadTermFont(BaseFontSz)
+  var fonts            = loadTermFont(BaseFontSz)
   let (initCw, initCh) = cellDims(fonts.primary, FontSz)
   let initCols         = int32(WinW.float32 / initCw)
   let initRows         = int32(WinH.float32 / initCh)
