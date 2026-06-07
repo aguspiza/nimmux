@@ -131,7 +131,7 @@ proc drawPane*(tf: var TermFonts; fontSize: float32; t: Terminal; r: Rect; focus
 proc drawWelcome*(font: Font; cellH: float32; sw, sh: float32) =
   const
     panelW = 440'f32
-    panelH = 350'f32
+    panelH = 378'f32
     pad    = 28'f32
     rowH   = 28'f32
     hints  = [
@@ -143,6 +143,7 @@ proc drawWelcome*(font: Font; cellH: float32; sw, sh: float32) =
       ("Ctrl+=",        "increase font size"),
       ("Ctrl+-",        "decrease font size"),
       ("Ctrl+F",        "zoom focused pane"),
+      ("Ctrl+Shift+S",  "toggle sidebar"),
     ]
 
   let px = (sw - panelW) * 0.5'f32
