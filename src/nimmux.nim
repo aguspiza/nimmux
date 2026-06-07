@@ -255,6 +255,26 @@ proc main() =
     addPane(id, initCols, initRows, saved.cwd,
             savedDaemonId = if saved.daemonSessionId >= 0: saved.daemonSessionId else: -1)
 
+  var selPane      = -1
+  var selDragging  = false
+  var selActive    = false
+  var selRect      = Rect()
+  var selCellW     = 0.0'f32
+  var selCellH     = 0.0'f32
+  var selStartRow  = 0
+  var selStartCol  = 0
+  var selEndRow    = 0
+  var selEndCol    = 0
+
+  proc pixelToCell(pos: Vector2; rect: Rect; cw, ch: float32): (int, int) =
+    (int((pos.y - rect.y) / ch), int((pos.x - rect.x) / cw))
+
+  proc normalizeSel(r1, c1, r2, c2: int): SelectionRange =
+    if r1 < r2 or (r1 == r2 and c1 <= c2):
+      SelectionRange(active: true, r1: r1, c1: c1, r2: r2, c2: c2)
+    else:
+      SelectionRange(active: true, r1: r2, c1: c2, r2: r1, c2: c1)
+
   var shouldQuit      = false
   var shellsExited    = false
   var zoomed          = false
@@ -443,6 +463,55 @@ proc main() =
         sidebar.updatePaneInfo(id, cwd, branch, ports, 0)
       dirty = true  # sidebar info refreshed
 
+    # selection: left-button drag → copy text to clipboard on release
+    let pArea = Rect(x: sidebarW, y: 0, w: curW - sidebarW, h: curH)
+    if isMouseButtonPressed(MouseButton.Left):
+      selActive = false
+      selDragging = false
+      if zoomed:
+        let id = ws.focused
+        if id in states:
+          let (cw, ch) = cellDims(fonts.primary, states[id].fontSize)
+          let rect = Rect(x: sidebarW, y: 0, w: curW - sidebarW, h: curH)
+          let (row, col) = pixelToCell(curMousePos, rect, cw, ch)
+          selPane = id; selRect = rect; selCellW = cw; selCellH = ch
+          selStartRow = clamp(row, 0, states[id].trm.rows.int - 1)
+          selStartCol = clamp(col, 0, states[id].trm.cols.int - 1)
+          selEndRow = selStartRow; selEndCol = selStartCol
+          selDragging = true
+      else:
+        for (id, rect) in ws.leafRects(pArea):
+          if curMousePos.x >= rect.x and curMousePos.x < rect.x + rect.w and
+             curMousePos.y >= rect.y and curMousePos.y < rect.y + rect.h:
+            let (cw, ch) = cellDims(fonts.primary, states[id].fontSize)
+            let (row, col) = pixelToCell(curMousePos, rect, cw, ch)
+            selPane = id; selRect = rect; selCellW = cw; selCellH = ch
+            selStartRow = clamp(row, 0, states[id].trm.rows.int - 1)
+            selStartCol = clamp(col, 0, states[id].trm.cols.int - 1)
+            selEndRow = selStartRow; selEndCol = selStartCol
+            selDragging = true
+            break
+
+    if selDragging and isMouseButtonDown(MouseButton.Left) and selPane in states:
+      let (row, col) = pixelToCell(curMousePos, selRect, selCellW, selCellH)
+      let r = clamp(row, 0, states[selPane].trm.rows.int - 1)
+      let c = clamp(col, 0, states[selPane].trm.cols.int - 1)
+      if r != selEndRow or c != selEndCol:
+        selEndRow = r; selEndCol = c; dirty = true
+
+    if isMouseButtonReleased(MouseButton.Left) and selDragging:
+      selDragging = false
+      let sel = normalizeSel(selStartRow, selStartCol, selEndRow, selEndCol)
+      if (sel.r1 != sel.r2 or sel.c1 != sel.c2) and selPane in states:
+        let text = termGetText(states[selPane].trm, sel.r1, sel.c1, sel.r2, sel.c2)
+        if text.strip().len > 0:
+          setClipboardText(text)
+          selActive = true
+
+    # clear selection on any keystroke
+    if getKeyPressed() != KeyboardKey.Null:
+      selActive = false; selDragging = false
+
     # reflow on window resize, sidebar toggle, or zoom toggle
     if curW != prevW or curH != prevH or sidebarExpanded != prevSidebarExpanded or zoomed != prevZoomed:
       dirty = true
@@ -477,11 +546,18 @@ proc main() =
       let sh = getScreenHeight().float32
       let paneW = sw - sidebarW
       if zoomed:
-        drawPane(fonts, states[ws.focused].fontSize, states[ws.focused].trm,
-                 Rect(x: sidebarW, y: 0, w: paneW, h: sh), true)
+        let id = ws.focused
+        let zSel = if (selDragging or selActive) and id == selPane:
+                     normalizeSel(selStartRow, selStartCol, selEndRow, selEndCol)
+                   else: SelectionRange()
+        drawPane(fonts, states[id].fontSize, states[id].trm,
+                 Rect(x: sidebarW, y: 0, w: paneW, h: sh), true, zSel)
       else:
         for (id, rect) in ws.leafRects(Rect(x: sidebarW, y: 0, w: paneW, h: sh)):
-          drawPane(fonts, states[id].fontSize, states[id].trm, rect, id == ws.focused)
+          let pSel = if (selDragging or selActive) and id == selPane:
+                       normalizeSel(selStartRow, selStartCol, selEndRow, selEndCol)
+                     else: SelectionRange()
+          drawPane(fonts, states[id].fontSize, states[id].trm, rect, id == ws.focused, pSel)
       if sidebarExpanded:
         let clickedPane = drawSidebar(fonts.primary, initCh, Rect(x: 0, y: 0, w: sidebarW, h: sh), sidebar, ws.focused)
         if clickedPane != -1 and clickedPane in states:

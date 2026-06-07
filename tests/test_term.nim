@@ -1,4 +1,4 @@
-import std/unittest
+import std/[strutils, unittest]
 import term
 
 suite "term":
@@ -36,4 +36,25 @@ suite "term":
       addr out2)
     termSendChar(t, 'c'.uint32, VTermModifier.Ctrl)  # Ctrl+C → \x03 (SIGINT byte)
     check out2 == "\x03"
+    termFree(t)
+
+  test "termGetText single row":
+    var t = termNew(80, 24)
+    termAdvance(t, "hello world")
+    let text = termGetText(t, 0, 0, 0, 10)
+    check text == "hello world"
+    termFree(t)
+
+  test "termGetText strips trailing spaces":
+    var t = termNew(20, 24)
+    termAdvance(t, "hi")
+    let text = termGetText(t, 0, 0, 0, 19)
+    check text == "hi"
+    termFree(t)
+
+  test "termGetText multi-row":
+    var t = termNew(80, 24)
+    termAdvance(t, "line1\r\nline2")
+    let text = termGetText(t, 0, 0, 1, 4)
+    check text == "line1\nline2"
     termFree(t)

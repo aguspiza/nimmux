@@ -4,10 +4,15 @@ import std/[os, sets, unicode]
 import raylib
 import term, workspace, fontcodepoints, fontprobe
 
+type SelectionRange* = object
+  active*: bool
+  r1*, c1*, r2*, c2*: int  # normalized so r1<=r2, and if r1==r2 then c1<=c2
+
 const
   DefaultFG: array[3, uint8] = [220'u8, 220, 220]
   DefaultBG: array[3, uint8] = [30'u8,  30,  30]
   CursorColor      = Color(r: 220, g: 220, b: 220, a: 180)
+  SelectionColor   = Color(r: 80,  g: 140, b: 255, a: 100)
   FocusBorderColor = Color(r: 80,  g: 140, b: 255, a: 255)
   BorderColor      = Color(r: 60,  g:  60, b:  60, a: 255)
   WelcomePanelBG   = Color(r: 12,  g:  16, b:  24, a: 245)
@@ -90,7 +95,16 @@ proc cellDims*(font: Font; fontSize: float32): (float32, float32) =
   let m = measureText(font, "M", fontSize, 0)
   (m.x, m.y)
 
-proc drawPane*(tf: var TermFonts; fontSize: float32; t: Terminal; r: Rect; focused: bool) =
+func inSelection(sel: SelectionRange; row, col: int): bool =
+  if not sel.active: return false
+  if row < sel.r1 or row > sel.r2: return false
+  if sel.r1 == sel.r2: return col >= sel.c1 and col <= sel.c2
+  if row == sel.r1: return col >= sel.c1
+  if row == sel.r2: return col <= sel.c2
+  true
+
+proc drawPane*(tf: var TermFonts; fontSize: float32; t: Terminal; r: Rect; focused: bool;
+               sel = SelectionRange()) =
   let (cellW, cellH) = cellDims(tf.primary, fontSize)
   let cols = int(r.w / cellW)
   let rows = int(r.h / cellH)
@@ -114,6 +128,11 @@ proc drawPane*(tf: var TermFonts; fontSize: float32; t: Terminal; r: Rect; focus
         drawRectangle(
           Rectangle(x: px, y: py, width: cellW, height: cellH),
           CursorColor)
+
+      if inSelection(sel, row, col):
+        drawRectangle(
+          Rectangle(x: px, y: py, width: cellW, height: cellH),
+          SelectionColor)
 
       let cp = cell.chars[0]
       if cp > 31'u32 and cp <= 0x10FFFF'u32:

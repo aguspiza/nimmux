@@ -1,7 +1,7 @@
 ## libvterm bindings + terminal wrapper.
 ## Compiles libvterm 0.3.3 from bundled vendor/libvterm source.
 
-import std/os
+import std/[os, unicode]
 
 const vtermSrc = currentSourcePath().parentDir / ".." / "vendor" / "libvterm" / "src"
 const vtermInc = currentSourcePath().parentDir / ".." / "vendor" / "libvterm" / "include"
@@ -243,3 +243,19 @@ proc termSendKey*(t: var Terminal; key: VTermKey; mods = VTermModifier.None) =
 
 proc termSendChar*(t: var Terminal; c: uint32; mods = VTermModifier.None) =
   vterm_keyboard_unichar(t.vt, c, mods)
+
+proc termGetText*(t: Terminal; r1, c1, r2, c2: int): string =
+  for row in r1..r2:
+    let colStart = if row == r1: c1 else: 0
+    let colEnd   = if row == r2: min(c2, t.cols - 1) else: t.cols - 1
+    var line = ""
+    for col in colStart..colEnd:
+      let cell = termCell(t, row.int32, col.int32)
+      let cp = cell.chars[0]
+      if cp >= 32'u32 and cp <= 0x10FFFF'u32:
+        line.add(Rune(cp).toUTF8())
+      else:
+        line.add(' ')
+    result.add(line.strip(leading = false))
+    if row < r2:
+      result.add('\n')
