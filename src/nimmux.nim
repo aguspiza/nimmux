@@ -297,6 +297,20 @@ proc main() =
     let ctrl  = isKeyDown(KeyboardKey.LeftControl)  or isKeyDown(KeyboardKey.RightControl)
     let shift = isKeyDown(KeyboardKey.LeftShift)    or isKeyDown(KeyboardKey.RightShift)
 
+    when defined(keydebug):
+      # -d:keydebug — dump every key event raylib sees, with modifier state.
+      # Drains the key queue (harmless: isKeyPressed state is separate).
+      block:
+        var dk = getKeyPressed()
+        while dk != KeyboardKey.Null:
+          stderr.writeLine "[keydebug] keyPressed=" & $dk & "(" & $dk.int &
+            ") lctrl=" & $isKeyDown(KeyboardKey.LeftControl) &
+            " rctrl=" & $isKeyDown(KeyboardKey.RightControl) &
+            " lshift=" & $isKeyDown(KeyboardKey.LeftShift) &
+            " rshift=" & $isKeyDown(KeyboardKey.RightShift)
+          dirty = true
+          dk = getKeyPressed()
+
     # mark dirty on any keyboard or mouse input
     if getKeyPressed() != KeyboardKey.Null or
        isMouseButtonPressed(MouseButton.Left) or isMouseButtonReleased(MouseButton.Left) or
@@ -309,6 +323,9 @@ proc main() =
       prevMousePos = curMousePos
 
     # split
+    when defined(keydebug):
+      if ctrl and isKeyPressed(KeyboardKey.D):
+        stderr.writeLine "[keydebug] SHORTCUT FIRED: Ctrl+D split"
     if ctrl and isKeyPressed(KeyboardKey.D):
       let dir      = if shift: Horizontal else: Vertical
       let focusFs  = states[ws.focused].fontSize
@@ -393,6 +410,8 @@ proc main() =
 
     var cp = getCharPressed()
     while cp != 0:
+      when defined(keydebug):
+        stderr.writeLine "[keydebug] charPressed=" & $cp & " ctrl=" & $ctrl
       let mods = if ctrl: VTermModifier.Ctrl else: VTermModifier.None
       states[ws.focused].trm.termSendChar(cp.uint32, mods)
       cp = getCharPressed()
