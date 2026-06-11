@@ -1,4 +1,4 @@
-import std/[strutils, unittest]
+import std/unittest
 import term
 
 suite "term":
@@ -7,6 +7,34 @@ suite "term":
     termAdvance(t, "hello")
     check termCell(t, 0, 0).ch == 'h'
     termFree(t)
+
+  test "default cell background resolves to terminal dark grey":
+    var t = termNew(80, 24)
+    let bg = termCell(t, 0, 0).bg.toRGB([28'u8, 28, 28])
+    check bg == [28'u8, 28, 28]
+    termFree(t)
+
+  test "base ANSI palette is softer and lighter":
+    const expected = [
+      [80'u8,  80,  80],
+      [220'u8, 110, 110],
+      [145'u8, 210, 145],
+      [230'u8, 210, 120],
+      [130'u8, 165, 230],
+      [210'u8, 145, 220],
+      [120'u8, 210, 210],
+      [235'u8, 235, 235],
+      [145'u8, 145, 145],
+      [255'u8, 140, 140],
+      [165'u8, 230, 165],
+      [255'u8, 230, 130],
+      [145'u8, 180, 255],
+      [230'u8, 165, 240],
+      [140'u8, 230, 230],
+      [245'u8, 245, 245],
+    ]
+    for i in 0..<16:
+      check xterm256[i] == expected[i]
 
   test "cursor advances after input":
     var t = termNew(80, 24)

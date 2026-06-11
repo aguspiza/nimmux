@@ -24,11 +24,11 @@ const vtermInc = currentSourcePath().parentDir / ".." / "vendor" / "libvterm" / 
 type
   ConstCStr* {.importc: "const char *".} = cstring
 
-  VTermColorRGB {.union.} = object
+  VTermColorRGB {.importc.} = object
     `type`*: uint8
-    r*, g*, b*: uint8
+    red*, green*, blue*: uint8
 
-  VTermColorIndexed {.union.} = object
+  VTermColorIndexed {.importc.} = object
     `type`*: uint8
     idx*: uint8
 
@@ -126,10 +126,12 @@ proc vterm_output_set_callback*(vt: ptr VTerm, fn: proc(s: ConstCStr, size: uint
 # ── color helpers ─────────────────────────────────────────────────────────────
 
 func isRGB*(c: VTermColor): bool =
-  (cast[uint8](c.`type`) and 0x01'u8) == cast[uint8](VTermColorType.RGB)
+  let t = cast[uint8](c.`type`)
+  (t and 0x07'u8) == 0'u8
 
 func isIndexed*(c: VTermColor): bool =
-  (cast[uint8](c.`type`) and 0x01'u8) == cast[uint8](VTermColorType.Indexed)
+  let t = cast[uint8](c.`type`)
+  (t and 0x07'u8) == cast[uint8](VTermColorType.Indexed)
 
 func isDefaultFG*(c: VTermColor): bool =
   cast[bool](cast[uint8](c.`type`) and cast[uint8](VTermColorType.DefaultFG))
@@ -137,14 +139,15 @@ func isDefaultFG*(c: VTermColor): bool =
 func isDefaultBG*(c: VTermColor): bool =
   cast[bool](cast[uint8](c.`type`) and cast[uint8](VTermColorType.DefaultBG))
 
-func r*(c: VTermColor): uint8 = {.emit: "`result` = `c`.rgb.red;".}
-func g*(c: VTermColor): uint8 = {.emit: "`result` = `c`.rgb.green;".}
-func b*(c: VTermColor): uint8 = {.emit: "`result` = `c`.rgb.blue;".}
-func idx*(c: VTermColor): uint8 = {.emit: "`result` = `c`.indexed.idx;".}
+func r*(c: VTermColor): uint8 = c.rgb.red
+func g*(c: VTermColor): uint8 = c.rgb.green
+func b*(c: VTermColor): uint8 = c.rgb.blue
+func idx*(c: VTermColor): uint8 = c.indexed.idx
 
 const xterm256*: array[256, array[3, uint8]] = [
-  [0'u8,0,0],[128,0,0],[0,128,0],[128,128,0],[0,0,128],[128,0,128],[0,128,128],[192,192,192],
-  [128,128,128],[255,0,0],[0,255,0],[255,255,0],[0,0,255],[255,0,255],[0,255,255],[255,255,255],
+  # Base ANSI 16: softer and lighter than the stock xterm palette.
+  [80'u8, 80, 80],[220,110,110],[145,210,145],[230,210,120],[130,165,230],[210,145,220],[120,210,210],[235,235,235],
+  [145,145,145],[255,140,140],[165,230,165],[255,230,130],[145,180,255],[230,165,240],[140,230,230],[245,245,245],
   [0,0,0],[0,0,95],[0,0,135],[0,0,175],[0,0,215],[0,0,255],
   [0,95,0],[0,95,95],[0,95,135],[0,95,175],[0,95,215],[0,95,255],
   [0,135,0],[0,135,95],[0,135,135],[0,135,175],[0,135,215],[0,135,255],

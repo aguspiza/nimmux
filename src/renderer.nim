@@ -9,17 +9,17 @@ type SelectionRange* = object
   r1*, c1*, r2*, c2*: int  # normalized so r1<=r2, and if r1==r2 then c1<=c2
 
 const
-  DefaultFG: array[3, uint8] = [220'u8, 220, 220]
-  DefaultBG: array[3, uint8] = [30'u8,  30,  30]
-  CursorColor      = Color(r: 220, g: 220, b: 220, a: 180)
+  DefaultFG: array[3, uint8] = [235'u8, 235, 235]
+  DefaultBG: array[3, uint8] = [28'u8,  28,  28]
+  CursorColor      = Color(r: 235, g: 235, b: 235, a: 180)
   SelectionColor   = Color(r: 80,  g: 140, b: 255, a: 100)
   FocusBorderColor = Color(r: 80,  g: 140, b: 255, a: 255)
   BorderColor      = Color(r: 60,  g:  60, b:  60, a: 255)
   WelcomePanelBG   = Color(r: 12,  g:  16, b:  24, a: 245)
   WelcomeDimFG     = Color(r: 100, g: 100, b: 110, a: 255)
-  SidebarBorder    = Color(r: 50,  g:  50, b:  60, a: 255)
-  SidebarText      = Color(r: 180, g: 180, b: 190, a: 255)
-  SidebarDimText   = Color(r: 100, g: 100, b: 120, a: 255)
+  SidebarBorder    = Color(r: 32,  g:  32, b:  40, a: 255)
+  SidebarText      = Color(r: 150, g: 150, b: 160, a: 255)
+  SidebarDimText   = Color(r: 80,  g:  80, b:  96, a: 255)
   NotifBadgeColor  = Color(r: 255, g:  80, b:  80, a: 255)
 
 proc toRColor(rgb: array[3, uint8]): Color =
@@ -233,7 +233,7 @@ proc drawSidebar*(font: Font; cellH: float32; r: Rect; sb: SidebarState; focused
   let sidebarW = sb.width
   
   # Background (left side)
-  drawRectangle(Rectangle(x: r.x, y: r.y, width: sidebarW, height: sh), Color(r: 24, g: 24, b: 32, a: 255))
+  drawRectangle(Rectangle(x: r.x, y: r.y, width: sidebarW, height: sh), Color(r: 12, g: 12, b: 18, a: 255))
   drawRectangleLines(Rectangle(x: r.x, y: r.y, width: sidebarW, height: sh), 1.0'f32, SidebarBorder)
   
   # Separator line between sidebar and panes
@@ -251,8 +251,8 @@ proc drawSidebar*(font: Font; cellH: float32; r: Rect; sb: SidebarState; focused
 
   for pane in sb.panes:
     let isFocused = pane.id == focusedId
-    let bgColor = if isFocused: Color(r: 40, g: 50, b: 70, a: 255)
-                  else:         Color(r: 0,  g:  0, b:  0, a: 120)
+    let bgColor = if isFocused: Color(r: 24, g: 32, b: 48, a: 255)
+                  else:         Color(r: 0,  g:  0, b:  0, a: 80)
     let entryRect = Rectangle(x: r.x, y: y, width: sidebarW, height: entryH)
     drawRectangle(entryRect, bgColor)
 
