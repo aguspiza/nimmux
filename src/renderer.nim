@@ -10,7 +10,7 @@ type SelectionRange* = object
 
 const
   DefaultFG: array[3, uint8] = [235'u8, 235, 235]
-  DefaultBG: array[3, uint8] = [28'u8,  28,  28]
+  DefaultBG: array[3, uint8] = [20'u8,  20,  20]
   CursorColor      = Color(r: 235, g: 235, b: 235, a: 180)
   SelectionColor   = Color(r: 80,  g: 140, b: 255, a: 100)
   FocusBorderColor = Color(r: 80,  g: 140, b: 255, a: 255)

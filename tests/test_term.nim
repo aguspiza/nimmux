@@ -10,8 +10,8 @@ suite "term":
 
   test "default cell background resolves to terminal dark grey":
     var t = termNew(80, 24)
-    let bg = termCell(t, 0, 0).bg.toRGB([28'u8, 28, 28])
-    check bg == [28'u8, 28, 28]
+    let bg = termCell(t, 0, 0).bg.toRGB([20'u8, 20, 20])
+    check bg == [20'u8, 20, 20]
     termFree(t)
 
   test "base ANSI palette is softer and lighter":
